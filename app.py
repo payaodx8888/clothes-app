@@ -13,6 +13,7 @@ import glob
 import time
 import base64
 import json
+import html
 
 try:
     from PIL import ImageGrab
@@ -20,7 +21,6 @@ try:
 except Exception:
     HAS_CLIPBOARD = False
 
-# クラウド公開用の requirements.txt を自動生成
 REQ_FILE = "requirements.txt"
 REQ_TEXT = "\n".join([
     "streamlit",
@@ -39,7 +39,7 @@ if not os.path.exists(REQ_FILE):
         pass
 
 # ==========================================
-# 設定エリア（PC・クラウド両対応）
+# 設定エリア
 # ==========================================
 _K1 = "AQ.Ab8RN6IHJDmDYNheq3LAZyIO"
 _K2 = "qxY6KwNa5ouLQGFCnb7uLjxAlQ"
@@ -62,8 +62,181 @@ EXPECTED_HEADERS = [
     "メイン画像URL", "サブ画像URL", "登録日"
 ]
 
-st.set_page_config(page_title="My Closet", layout="wide")
-st.title("👕 洋服管理＆サイズ比較システム")
+st.set_page_config(
+    page_title="WARDROBE",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# --- スマホ最適化＆スタイリッシュUI用CSS ---
+CUSTOM_CSS = """
+<style>
+.block-container {
+    padding-top: 1.2rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 960px !important;
+}
+.app-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    border-bottom: 1px solid rgba(128,128,128,0.25);
+    padding-bottom: 6px;
+    margin-bottom: 8px;
+}
+.app-title {
+    font-size: 1.25rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    margin: 0;
+}
+.app-sub {
+    font-size: 0.7rem;
+    opacity: 0.55;
+    letter-spacing: 0.08em;
+}
+.spec-card {
+    display: flex;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid rgba(128,128,128,0.22);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    background: rgba(128,128,128,0.03);
+    align-items: center;
+}
+.spec-thumb {
+    width: 62px;
+    height: 62px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(128,128,128,0.1);
+}
+.spec-body {
+    flex: 1;
+    min-width: 0;
+}
+.spec-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+.sz-badge {
+    background: #111;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 5px;
+    letter-spacing: 0.03em;
+}
+.brand-txt {
+    font-size: 0.78rem;
+    font-weight: 700;
+    opacity: 0.85;
+}
+.item-txt {
+    font-size: 0.82rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+.color-txt {
+    font-size: 0.72rem;
+    opacity: 0.65;
+}
+.metrics-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+.m-pill {
+    font-size: 0.72rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(128,128,128,0.12);
+    font-weight: 500;
+}
+.m-pill b {
+    font-weight: 700;
+}
+.closet-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+@media (min-width: 768px) {
+    .closet-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+    }
+}
+.closet-card {
+    border: 1px solid rgba(128,128,128,0.2);
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(128,128,128,0.02);
+}
+.closet-img-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: rgba(128,128,128,0.08);
+}
+.closet-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.closet-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0,0,0,0.75);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+}
+.closet-info {
+    padding: 8px;
+}
+.closet-b {
+    font-size: 0.7rem;
+    font-weight: 700;
+    opacity: 0.65;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.closet-n {
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+}
+.closet-m {
+    font-size: 0.68rem;
+    opacity: 0.75;
+    line-height: 1.35;
+}
+</style>
+<div class="app-header">
+  <p class="app-title">WARDROBE</p>
+  <span class="app-sub">ARCHIVE & SIZING</span>
+</div>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 class ClothInfo(BaseModel):
     brand: str = ""
@@ -127,6 +300,14 @@ def decode_str_to_pil(val: str):
             return None
     return None
 
+def get_img_src(val: str) -> str:
+    s = str(val).strip()
+    if s.startswith("B64:"):
+        return f"data:image/jpeg;base64,{s[4:]}"
+    if s.startswith("http"):
+        return s
+    return ""
+
 def show_saved_image(val: str):
     s = str(val).strip()
     if not s:
@@ -139,6 +320,15 @@ def show_saved_image(val: str):
             st.image(s, use_container_width=True)
     except Exception:
         pass
+
+def fmt_num(v) -> str:
+    try:
+        f = float(v)
+        if f <= 0:
+            return ""
+        return str(int(f)) if f.is_integer() else str(f)
+    except Exception:
+        return ""
 
 def pack_images_for_row(img_list):
     if not img_list:
@@ -222,26 +412,236 @@ for k, v in default_form_values.items():
         st.session_state[k] = v
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 サイズ比較・一覧",
-    "🖼️ ギャラリー",
-    "➕ 新規アイテム登録",
-    "✏️ 編集・画像追加"
+    "📏 サイズ比較",
+    "🖼️ クローゼット",
+    "➕ 登録",
+    "✏️ 編集"
 ])
+
+# ==========================================
+# データ読み込み（全タブ共通）
+# ==========================================
+records = worksheet.get_all_records()
+df = pd.DataFrame(records)
+
+# ==========================================
+# タブ1：サイズ比較（スマホ特化・横スクロール不要）
+# ==========================================
+with tab1:
+    if not df.empty:
+        fc1, fc2 = st.columns([2, 1])
+        with fc1:
+            sel_cat = st.radio(
+                "カテゴリ",
+                ["ALL", "トップス", "アウター", "ボトムス", "その他"],
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+        with fc2:
+            view_mode = st.selectbox(
+                "表示切替",
+                ["📱 スマホ最適化カード", "📊 コンパクト表"],
+                label_visibility="collapsed"
+            )
+
+        if sel_cat != "ALL":
+            df_f = df[df["カテゴリ"] == sel_cat]
+        else:
+            df_f = df
+
+        if "📱" in view_mode:
+            cards_html = []
+            m_keys = [
+                ("ウエスト", "W"),
+                ("股下", "股下"),
+                ("わたり幅", "わたり"),
+                ("ヒップ", "H"),
+                ("着丈", "着丈"),
+                ("身幅", "身幅"),
+                ("肩幅", "肩幅"),
+                ("袖丈", "袖丈")
+            ]
+            for _, r in df_f.iterrows():
+                src = get_img_src(r.get("メイン画像URL", ""))
+                if src:
+                    img_tag = (
+                        f'<img src="{src}" class="spec-thumb">'
+                    )
+                else:
+                    img_tag = '<div class="spec-thumb"></div>'
+
+                sz = html.escape(
+                    str(r.get("表記サイズ") or "-")
+                )
+                br = html.escape(
+                    str(r.get("ブランド") or "")
+                )
+                nm = html.escape(
+                    str(r.get("アイテム名") or "")
+                )
+                cl = html.escape(str(r.get("色") or ""))
+                cl_str = f"({cl})" if cl else ""
+
+                pills = []
+                for col_k, short_k in m_keys:
+                    val_s = fmt_num(r.get(col_k, 0))
+                    if val_s:
+                        pills.append(
+                            f'<span class="m-pill">'
+                            f'{short_k} <b>{val_s}</b></span>'
+                        )
+                pills_html = "".join(pills)
+
+                card = (
+                    f'<div class="spec-card">{img_tag}'
+                    f'<div class="spec-body">'
+                    f'<div class="spec-top">'
+                    f'<span class="sz-badge">{sz}</span>'
+                    f'<span class="brand-txt">{br}</span>'
+                    f'<span class="color-txt">{cl_str}</span>'
+                    f'</div>'
+                    f'<div class="item-txt">{nm}</div>'
+                    f'<div class="metrics-wrap">'
+                    f'{pills_html}</div>'
+                    f'</div></div>'
+                )
+                cards_html.append(card)
+            st.markdown(
+                "".join(cards_html),
+                unsafe_allow_html=True
+            )
+        else:
+            if sel_cat == "ボトムス":
+                t_cols = [
+                    "表記サイズ", "アイテム名", "ブランド",
+                    "色", "ウエスト", "股下", "わたり幅",
+                    "ヒップ", "着丈"
+                ]
+            elif sel_cat in ["トップス", "アウター"]:
+                t_cols = [
+                    "表記サイズ", "アイテム名", "ブランド",
+                    "色", "着丈", "身幅", "肩幅", "袖丈"
+                ]
+            else:
+                t_cols = [
+                    "表記サイズ", "アイテム名", "ブランド",
+                    "色", "着丈", "身幅", "肩幅", "袖丈",
+                    "ウエスト", "股下", "わたり幅", "ヒップ"
+                ]
+            disp_cols = [
+                c for c in t_cols if c in df_f.columns
+            ]
+            df_show = df_f[disp_cols].rename(
+                columns={
+                    "表記サイズ": "サイズ",
+                    "わたり幅": "わたり"
+                }
+            )
+            st.dataframe(
+                df_show,
+                use_container_width=True,
+                hide_index=True
+            )
+    else:
+        st.info("まだ登録データがありません。")
+
+# ==========================================
+# タブ2：クローゼット（iPhoneでも2列グリッド表示）
+# ==========================================
+with tab2:
+    if not df.empty:
+        c_cat = st.radio(
+            "ギャラリー絞り込み",
+            ["ALL", "トップス", "アウター", "ボトムス", "その他"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="closet_cat_radio"
+        )
+        df_c = (
+            df[df["カテゴリ"] == c_cat]
+            if c_cat != "ALL"
+            else df
+        )
+
+        grid_items = ['<div class="closet-grid">']
+        for _, r in df_c.iterrows():
+            src = get_img_src(r.get("メイン画像URL", ""))
+            img_el = (
+                f'<img src="{src}" class="closet-img">'
+                if src
+                else '<div class="closet-img"></div>'
+            )
+            sz = html.escape(
+                str(r.get("表記サイズ") or "-")
+            )
+            br = html.escape(str(r.get("ブランド") or ""))
+            nm = html.escape(str(r.get("アイテム名") or ""))
+            cl = html.escape(str(r.get("色") or ""))
+            b_line = f"{br} / {cl}" if cl else br
+
+            m_parts = []
+            for k, lbl in [
+                ("着丈", "丈"), ("身幅", "幅"),
+                ("ウエスト", "W"), ("股下", "股")
+            ]:
+                v = fmt_num(r.get(k, 0))
+                if v:
+                    m_parts.append(f"{lbl}{v}")
+            m_line = " ".join(m_parts)
+
+            item_html = (
+                f'<div class="closet-card">'
+                f'<div class="closet-img-wrap">{img_el}'
+                f'<span class="closet-badge">{sz}</span>'
+                f'</div>'
+                f'<div class="closet-info">'
+                f'<div class="closet-b">{b_line}</div>'
+                f'<div class="closet-n">{nm}</div>'
+                f'<div class="closet-m">{m_line}</div>'
+                f'</div></div>'
+            )
+            grid_items.append(item_html)
+        grid_items.append("</div>")
+        st.markdown(
+            "".join(grid_items),
+            unsafe_allow_html=True
+        )
+
+        st.write("")
+        with st.expander("🔍 サブ画像・詳細を拡大して見る"):
+            opts = [
+                f"{r.get('アイテムID')} | "
+                f"{r.get('ブランド')} - {r.get('アイテム名')}"
+                for _, r in df_c.iterrows()
+            ]
+            if opts:
+                s_item = st.selectbox("アイテムを選択", opts)
+                s_id = s_item.split(" | ")[0]
+                s_row = df[
+                    df["アイテムID"].astype(str) == s_id
+                ].iloc[0]
+                show_saved_image(
+                    s_row.get("メイン画像URL", "")
+                )
+                s_urls = str(
+                    s_row.get("サブ画像URL", "")
+                ).split(",")
+                for su in s_urls:
+                    if su.strip():
+                        show_saved_image(su.strip())
+    else:
+        st.info("まだデータがありません。")
 
 # ==========================================
 # タブ3：新規アイテム登録
 # ==========================================
 with tab3:
-    st.subheader("1. スクショ読み込み ＆ AI全自動入力")
-    st.caption(
-        "💡 PCでのスクショ貼り付け・フォルダ読込、または"
-        "スマホの写真フォルダから選択できます。"
-    )
+    st.markdown("##### 1. スクショ読込 ＆ AI自動入力")
     col_b1, col_b2, col_b3 = st.columns([1.2, 1.5, 1])
 
     with col_b1:
         if st.button(
-            "📋 スクショを貼り付け (PC)",
+            "📋 スクショ貼付 (PC)",
             use_container_width=True
         ):
             if HAS_CLIPBOARD:
@@ -253,15 +653,15 @@ with tab3:
                         )
                         st.toast("画像を追加しました！", icon="📸")
                     else:
-                        st.warning("クリップボードに画像がありません。")
+                        st.warning("画像がありません。")
                 except Exception:
-                    st.warning("スマホからは下の画像選択を使ってください。")
+                    st.warning("下のファイル選択を使ってください。")
             else:
-                st.warning("スマホからは下の画像選択を使ってください。")
+                st.warning("下のファイル選択を使ってください。")
 
     with col_b2:
         if st.button(
-            "📂 フォルダから一括読込 (PC)",
+            "📂 フォルダ一括読込 (PC)",
             use_container_width=True
         ):
             img_paths = []
@@ -290,13 +690,13 @@ with tab3:
     with col_b3:
         c_clear1, c_clear2 = st.columns(2)
         if c_clear1.button(
-            "🗑️ 画面クリア",
+            "🗑️ クリア",
             use_container_width=True
         ):
             st.session_state.staged_images = []
             st.rerun()
         if c_clear2.button(
-            "🧹 フォルダ空",
+            "🧹 空にする",
             use_container_width=True
         ):
             for f in glob.glob(
@@ -309,7 +709,7 @@ with tab3:
             st.toast("フォルダを空にしました！", icon="🧹")
 
     mob_files = st.file_uploader(
-        "📱 スマホ・PCから画像ファイルを選択して追加（複数可）",
+        "📱 iPhone・PCから画像を選択して追加（複数可）",
         type=["jpg", "jpeg", "png", "webp"],
         accept_multiple_files=True,
         key="top_mob_uploader"
@@ -322,7 +722,6 @@ with tab3:
                 )
             st.toast("画像を追加しました！", icon="📱")
 
-    st.markdown("---")
     col_ai1, col_ai2, col_ai3, col_ai4 = st.columns(
         [1.2, 1.2, 1.3, 1.5]
     )
@@ -334,7 +733,7 @@ with tab3:
         )
     with col_ai2:
         ai_model = st.selectbox(
-            "使用するAIモデル",
+            "AIモデル",
             [
                 "gemini-3.8-flash (高速)",
                 "gemini-3.8-pro (高精度)"
@@ -351,7 +750,6 @@ with tab3:
             value=True
         )
     with col_ai4:
-        st.write("")
         run_ai = st.button(
             "🪄 ページ全体からAI自動入力",
             type="primary",
@@ -510,7 +908,7 @@ with tab3:
             st.session_state.staged_images
         ):
             with p_cols[idx % 4]:
-                cap = f"画像 #{idx+1}" + (
+                cap = f"#{idx+1}" + (
                     " (メイン)" if idx == 0 else ""
                 )
                 st.image(
@@ -525,7 +923,7 @@ with tab3:
                     images_to_save.append(img)
 
     st.divider()
-    st.subheader("2. アイテム情報の確認・手動修正・登録")
+    st.markdown("##### 2. アイテム情報の確認・登録")
 
     with st.form("register_form"):
         c1, c2, c3, c4 = st.columns(4)
@@ -540,7 +938,6 @@ with tab3:
         )
         color = c4.text_input("色（カラー）", key="f_color")
 
-        st.markdown("##### 📏 サイズ情報 (cm)")
         sc1, sc2, sc3, sc4, sc5 = st.columns(5)
         size_label = sc1.text_input(
             "表記サイズ", key="f_size_label"
@@ -582,7 +979,8 @@ with tab3:
 
         submitted = st.form_submit_button(
             "💾 シートに保存する",
-            type="primary"
+            type="primary",
+            use_container_width=True
         )
 
         if submitted:
@@ -611,85 +1009,13 @@ with tab3:
                 st.success(
                     f"「{brand} {item_name}」を保存しました！"
                 )
-
-# ==========================================
-# データ読み込み（タブ1・2・4共通）
-# ==========================================
-records = worksheet.get_all_records()
-df = pd.DataFrame(records)
-
-with tab1:
-    st.subheader("📏 手持ち服のサイズ比較")
-    if not df.empty:
-        sel_cat = st.selectbox(
-            "カテゴリで絞り込み",
-            ["すべて", "トップス", "アウター", "ボトムス", "その他"]
-        )
-        if sel_cat != "すべて":
-            df_f = df[df["カテゴリ"] == sel_cat]
-        else:
-            df_f = df
-
-        target_cols = [
-            "ブランド", "アイテム名", "カテゴリ", "色",
-            "表記サイズ", "着丈", "身幅", "肩幅", "袖丈",
-            "ウエスト", "股下", "ヒップ", "わたり幅"
-        ]
-        disp_cols = [
-            c for c in target_cols if c in df_f.columns
-        ]
-        st.dataframe(
-            df_f[disp_cols],
-            use_container_width=True,
-            hide_index=True
-        )
-    else:
-        st.info("まだデータがありません。")
-
-with tab2:
-    st.subheader("🖼️ デジタルクローゼット")
-    if not df.empty:
-        cols = st.columns(3)
-        for idx, row in df.iterrows():
-            with cols[idx % 3]:
-                with st.container(border=True):
-                    m_url = row.get("メイン画像URL", "")
-                    if m_url:
-                        show_saved_image(m_url)
-                    c_str = (
-                        f" / {row.get('色')}"
-                        if row.get("色")
-                        else ""
-                    )
-                    b_str = row.get("ブランド", "")
-                    i_str = row.get("アイテム名", "")
-                    s_str = row.get("表記サイズ", "")
-                    st.markdown(
-                        f"**{b_str}** - {i_str} ({s_str}{c_str})"
-                    )
-                    with st.expander("詳細・サブ画像を見る"):
-                        d_list = []
-                        for k in [
-                            "着丈", "身幅", "ウエスト",
-                            "股下", "ヒップ", "わたり幅"
-                        ]:
-                            if row.get(k):
-                                d_list.append(f"{k}: {row[k]}cm")
-                        st.write(" / ".join(d_list))
-                        s_urls = str(
-                            row.get("サブ画像URL", "")
-                        ).split(",")
-                        for s_u in s_urls:
-                            if s_u.strip():
-                                show_saved_image(s_u.strip())
-    else:
-        st.info("まだデータがありません。")
+                time.sleep(0.8)
+                st.rerun()
 
 # ==========================================
 # タブ4：登録済みアイテムの編集・画像追加
 # ==========================================
 with tab4:
-    st.subheader("✏️ 登録済みアイテムの編集・画像追加")
     if df.empty:
         st.info("まだ登録されたアイテムがありません。")
     else:
@@ -730,9 +1056,9 @@ with tab4:
             for idx, e_img in enumerate(existing_pils):
                 with e_cols[idx % 4]:
                     lbl = (
-                        "現在のメイン画像"
+                        "メイン"
                         if idx == 0
-                        else f"サブ画像 #{idx}"
+                        else f"サブ #{idx}"
                     )
                     st.image(
                         e_img,
@@ -740,7 +1066,7 @@ with tab4:
                         use_container_width=True
                     )
                     if st.checkbox(
-                        "この画像を残す",
+                        "残す",
                         value=True,
                         key=f"keep_{sel_id}_{idx}"
                     ):
@@ -753,7 +1079,7 @@ with tab4:
         ec1, ec2, ec3 = st.columns([1.2, 1.5, 1])
         with ec1:
             if st.button(
-                "📋 スクショを追加貼付 (PC)",
+                "📋 スクショ貼付 (PC)",
                 use_container_width=True
             ):
                 if HAS_CLIPBOARD:
@@ -763,16 +1089,16 @@ with tab4:
                             st.session_state.edit_staged_images.append(
                                 grabbed.convert("RGB")
                             )
-                            st.toast("追加画像をセットしました！", icon="📸")
+                            st.toast("セットしました！", icon="📸")
                         else:
-                            st.warning("クリップボードに画像がありません。")
+                            st.warning("画像がありません。")
                     except Exception:
-                        st.warning("下のファイル選択を使ってください。")
+                        st.warning("ファイル選択を使ってください。")
                 else:
-                    st.warning("下のファイル選択を使ってください。")
+                    st.warning("ファイル選択を使ってください。")
         with ec2:
             if st.button(
-                "📂 フォルダから追加読込 (PC)",
+                "📂 フォルダ読込 (PC)",
                 use_container_width=True
             ):
                 img_paths = []
@@ -796,7 +1122,7 @@ with tab4:
                     st.warning("フォルダに画像がありません。")
         with ec3:
             if st.button(
-                "🗑️ 追加分をクリア",
+                "🗑️ 追加分クリア",
                 use_container_width=True
             ):
                 st.session_state.edit_staged_images = []
@@ -811,7 +1137,7 @@ with tab4:
                 with n_cols[idx % 4]:
                     st.image(
                         n_img,
-                        caption=f"追加画像 #{idx+1}",
+                        caption=f"追加 #{idx+1}",
                         use_container_width=True
                     )
                     if st.checkbox(
@@ -822,16 +1148,15 @@ with tab4:
                         new_to_add.append(n_img)
 
         add_mode = st.radio(
-            "新しい画像の追加方法",
+            "画像の追加位置",
             [
-                "サブ画像として末尾に追加する",
-                "新しく追加する1枚目をメイン画像にする"
+                "サブ画像として末尾に追加",
+                "新しい1枚目をメイン画像にする"
             ],
             horizontal=True
         )
 
         with st.form("edit_item_form"):
-            st.markdown("##### 📝 登録情報の確認・修正")
             fc1, fc2, fc3, fc4 = st.columns(4)
             e_brand = fc1.text_input(
                 "ブランド名",
@@ -905,7 +1230,7 @@ with tab4:
             )
 
             edit_files = st.file_uploader(
-                "📱 スマホ・ファイルから画像を追加する場合（任意）",
+                "📱 iPhone・ファイルから画像を追加（任意）",
                 type=["jpg", "jpeg", "png", "webp"],
                 accept_multiple_files=True,
                 key="edit_file_up"
@@ -913,7 +1238,8 @@ with tab4:
 
             save_edit = st.form_submit_button(
                 "💾 変更と追加画像を保存する",
-                type="primary"
+                type="primary",
+                use_container_width=True
             )
 
             if save_edit:
@@ -978,14 +1304,9 @@ with tab4:
                     time.sleep(1)
                     st.rerun()
 
-# PCローカル実行時のみ、クラウド公開用のSecretsテキストを自動生成して表示
 if json_files:
     st.divider()
-    with st.expander("🌐 iPhone（クラウド）公開用の設定データ（Secrets）を表示"):
-        st.caption(
-            "Streamlit Cloud の『Secrets』欄に、"
-            "右上のコピーボタンを押してそのまま貼り付けてください。"
-        )
+    with st.expander("🌐 クラウド公開用の設定データ（Secrets）"):
         try:
             with open(json_files[0], "r", encoding="utf-8") as jf:
                 j_obj = json.load(jf)
