@@ -20,7 +20,7 @@ except Exception:
     HAS_PASTE_BTN = False
 
 # ==========================================
-# 設定エリア（Webクラウド専用）
+# 設定エリア
 # ==========================================
 _K1 = "AQ.Ab8RN6IHJDmDYNheq3LAZyIO"
 _K2 = "qxY6KwNa5ouLQGFCnb7uLjxAlQ"
@@ -700,11 +700,11 @@ with tab2:
         st.info("データがありません。")
 
 # ==========================================
-# タブ3：新規アイテム登録（超シンプル版）
+# タブ3：新規アイテム登録（案A：アルバム選択＋PCワンクリック貼付）
 # ==========================================
 with tab3:
     reg_files = st.file_uploader(
-        "📸 画像を選択 (PCは枠内で Ctrl+V も可)",
+        "📁 アルバム・ファイルから選択",
         type=["jpg", "jpeg", "png", "webp"],
         accept_multiple_files=True,
         key=f"t3_up_{st.session_state.up_key_t3}"
@@ -719,8 +719,34 @@ with tab3:
                     Image.open(io.BytesIO(raw_b)).convert("RGB")
                 )
 
-    bar1, bar2, bar3, bar4 = st.columns([1.2, 1.8, 0.8, 0.8])
+    bar1, bar2, bar3, bar4 = st.columns([1.2, 1.1, 1.5, 0.8])
     with bar1:
+        if HAS_PASTE_BTN:
+            p_res = paste_image_button(
+                label="📋 スクショ貼付",
+                background_color="#2563eb",
+                hover_background_color="#1d4ed8",
+                key=f"t3_paste_{st.session_state.up_key_t3}"
+            )
+            if p_res.image_data is not None:
+                b_io = io.BytesIO()
+                p_res.image_data.save(b_io, format="PNG")
+                p_hash = hashlib.md5(
+                    b_io.getvalue()
+                ).hexdigest()
+                if p_hash not in st.session_state.processed_hashes_t3:
+                    st.session_state.processed_hashes_t3.add(p_hash)
+                    st.session_state.staged_images.append(
+                        p_res.image_data.convert("RGB")
+                    )
+        else:
+            st.button(
+                "📋 貼付(要Reboot)",
+                disabled=True,
+                use_container_width=True,
+                key="t3_paste_disabled"
+            )
+    with bar2:
         target_size = st.text_input(
             "サイズ指定",
             value="",
@@ -728,31 +754,13 @@ with tab3:
             label_visibility="collapsed",
             key="t3_target_size"
         )
-    with bar2:
+    with bar3:
         run_ai = st.button(
             "🪄 AI自動入力",
             type="primary",
             use_container_width=True,
             key="t3_btn_run_ai"
         )
-    with bar3:
-        if HAS_PASTE_BTN:
-            p_res = paste_image_button(
-                label="📋 貼付",
-                background_color="#334155",
-                hover_background_color="#1e293b",
-                key="t3_paste_btn"
-            )
-            if p_res.image_data is not None:
-                b_io = io.BytesIO()
-                p_res.image_data.save(b_io, format="PNG")
-                p_hash = hashlib.md5(b_io.getvalue()).hexdigest()
-                if p_hash not in st.session_state.processed_hashes_t3:
-                    st.session_state.processed_hashes_t3.add(p_hash)
-                    st.session_state.staged_images.append(
-                        p_res.image_data.convert("RGB")
-                    )
-                    st.rerun()
     with bar4:
         if st.button(
             "🗑️ クリア",
@@ -909,7 +917,7 @@ with tab3:
                 except Exception as e:
                     st.error(f"AIエラー: {e}")
         else:
-            st.warning("先に画像を選択してください。")
+            st.warning("先に画像を追加してください。")
 
     images_to_save = []
     if st.session_state.staged_images:
@@ -1007,7 +1015,7 @@ with tab3:
                 st.rerun()
 
 # ==========================================
-# タブ4：編集・画像追加（シンプル版）
+# タブ4：編集・画像追加
 # ==========================================
 with tab4:
     if df.empty:
@@ -1058,7 +1066,7 @@ with tab4:
                         kept_existing_pils.append(e_img)
 
         edit_add_files = st.file_uploader(
-            "📸 追加する画像を選択 (Ctrl+V も可)",
+            "📁 追加する画像を選択",
             type=["jpg", "jpeg", "png", "webp"],
             accept_multiple_files=True,
             key=f"t4_up_{st.session_state.up_key_t4}"
@@ -1073,14 +1081,14 @@ with tab4:
                         Image.open(io.BytesIO(raw_b4)).convert("RGB")
                     )
 
-        eb1, eb2, eb3 = st.columns([1, 1, 2])
+        eb1, eb2, eb3 = st.columns([1.2, 1, 1.8])
         with eb1:
             if HAS_PASTE_BTN:
                 p_res4 = paste_image_button(
-                    label="📋 貼付",
-                    background_color="#334155",
-                    hover_background_color="#1e293b",
-                    key="t4_paste_btn"
+                    label="📋 スクショ貼付",
+                    background_color="#2563eb",
+                    hover_background_color="#1d4ed8",
+                    key=f"t4_paste_{st.session_state.up_key_t4}"
                 )
                 if p_res4.image_data is not None:
                     b_io4 = io.BytesIO()
@@ -1093,7 +1101,13 @@ with tab4:
                         st.session_state.edit_staged_images.append(
                             p_res4.image_data.convert("RGB")
                         )
-                        st.rerun()
+            else:
+                st.button(
+                    "📋 貼付(要Reboot)",
+                    disabled=True,
+                    use_container_width=True,
+                    key="t4_paste_disabled"
+                )
         with eb2:
             if st.button(
                 "🗑️ 追加クリア",
