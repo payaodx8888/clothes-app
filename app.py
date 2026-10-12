@@ -14,6 +14,19 @@ import time
 import base64
 import json
 import html
+import hashlib
+
+try:
+    from PIL import ImageGrab
+    HAS_IMAGEGRAB = True
+except Exception:
+    HAS_IMAGEGRAB = False
+
+try:
+    from streamlit_paste_button import paste_image_button
+    HAS_PASTE_BTN = True
+except Exception:
+    HAS_PASTE_BTN = False
 
 REQ_FILE = "requirements.txt"
 REQ_TEXT = "\n".join([
@@ -23,7 +36,8 @@ REQ_TEXT = "\n".join([
     "google-auth",
     "google-genai",
     "Pillow",
-    "pydantic"
+    "pydantic",
+    "streamlit-paste-button"
 ])
 if not os.path.exists(REQ_FILE):
     try:
@@ -434,6 +448,10 @@ if "staged_images" not in st.session_state:
     st.session_state.staged_images = []
 if "edit_staged_images" not in st.session_state:
     st.session_state.edit_staged_images = []
+if "last_paste_hash_t3" not in st.session_state:
+    st.session_state.last_paste_hash_t3 = ""
+if "last_paste_hash_t4" not in st.session_state:
+    st.session_state.last_paste_hash_t4 = ""
 
 default_form_values = {
     "f_brand": "",
@@ -781,11 +799,86 @@ with tab2:
 # タブ3：新規アイテム登録
 # ==========================================
 with tab3:
-    st.markdown("##### 1. 画像選択 ＆ AI自動入力")
-    st.caption("💡 スマホ・PCのファイル選択からスクショを選んで追加できます。")
+    st.markdown("##### 1. スクショ貼り付け・画像選択 ＆ AI自動入力")
+    st.caption(
+        "💡 PCでスクショ（Win+Shift+S等）を撮った直後に、"
+        "下の『📋 スクショを直接貼り付け』ボタンを押すか、"
+        "ファイル選択枠で Ctrl+V を押すとそのまま取り込めます！"
+    )
+
+    p_col1, p_col2, p_col3 = st.columns([1.4, 1.2, 1])
+
+    with p_col1:
+        if HAS_PASTE_BTN:
+            p_res = paste_image_button(
+                label="📋 スクショを直接貼り付け (PC/Cloud対応)",
+                background_color="#2563eb",
+                hover_background_color="#1d4ed8",
+                key="t3_paste_component"
+            )
+            if p_res.image_data is not None:
+                b_io = io.BytesIO()
+                p_res.image_data.save(b_io, format="PNG")
+                img_hash = hashlib.md5(b_io.getvalue()).hexdigest()
+                if img_hash != st.session_state.last_paste_hash_t3:
+                    st.session_state.last_paste_hash_t3 = img_hash
+                    st.session_state.staged_images.append(
+                        p_res.image_data.convert("RGB")
+                    )
+                    st.toast("スクショを貼り付けました！", icon="📸")
+        elif HAS_IMAGEGRAB:
+            if st.button(
+                "📋 スクショを直接貼り付け",
+                use_container_width=True,
+                key="t3_local_paste"
+            ):
+                try:
+                    grabbed = ImageGrab.grabclipboard()
+                    if isinstance(grabbed, Image.Image):
+                        st.session_state.staged_images.append(
+                            grabbed.convert("RGB")
+                        )
+                        st.toast("スクショを貼り付けました！", icon="📸")
+                    else:
+                        st.warning("クリップボードに画像がありません。")
+                except Exception:
+                    st.warning("下のファイル選択枠で Ctrl+V を押してください。")
+
+    with p_col2:
+        if json_files:
+            if st.button(
+                "📂 input_images 一括読込",
+                use_container_width=True,
+                key="t3_folder_load"
+            ):
+                img_paths = []
+                for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
+                    img_paths.extend(
+                        glob.glob(os.path.join(LOCAL_INPUT_DIR, ext))
+                    )
+                if img_paths:
+                    for p in sorted(img_paths):
+                        try:
+                            im = Image.open(p).convert("RGB")
+                            st.session_state.staged_images.append(im)
+                        except Exception:
+                            pass
+                    st.toast(f"{len(img_paths)}枚読み込みました！")
+                else:
+                    st.warning("フォルダに画像がありません。")
+
+    with p_col3:
+        if st.button(
+            "🗑️ 読込画像をクリア",
+            use_container_width=True,
+            key="t3_btn_clear_staged"
+        ):
+            st.session_state.staged_images = []
+            st.session_state.last_paste_hash_t3 = ""
+            st.rerun()
 
     reg_files = st.file_uploader(
-        "📁 スクショや商品画像を選択して追加（複数可）",
+        "📁 スマホの写真選択 / PCファイル選択（ここをクリックして Ctrl+V ペーストも可）",
         type=["jpg", "jpeg", "png", "webp"],
         accept_multiple_files=True,
         key="t3_file_uploader"
@@ -800,10 +893,6 @@ with tab3:
                     Image.open(rf).convert("RGB")
                 )
             st.toast("画像を追加しました！", icon="📸")
-
-    if st.button("🗑️ 読込画像をすべてクリア", key="t3_btn_clear_staged"):
-        st.session_state.staged_images = []
-        st.rerun()
 
     col_ai1, col_ai2, col_ai3, col_ai4 = st.columns(
         [1.2, 1.2, 1.3, 1.5]
@@ -1158,24 +1247,48 @@ with tab4:
 
         st.markdown("---")
         st.markdown("##### 📸 新しい画像を追加する")
-        
+
+        ec1, ec2 = st.columns([1.5, 1])
+        with ec1:
+            if HAS_PASTE_BTN:
+                p_res4 = paste_image_button(
+                    label="📋 スクショを直接貼り付け",
+                    background_color="#2563eb",
+                    hover_background_color="#1d4ed8",
+                    key="t4_paste_component"
+                )
+                if p_res4.image_data is not None:
+                    b_io4 = io.BytesIO()
+                    p_res4.image_data.save(b_io4, format="PNG")
+                    h4 = hashlib.md5(b_io4.getvalue()).hexdigest()
+                    if h4 != st.session_state.last_paste_hash_t4:
+                        st.session_state.last_paste_hash_t4 = h4
+                        st.session_state.edit_staged_images.append(
+                            p_res4.image_data.convert("RGB")
+                        )
+                        st.toast("追加画像を貼り付けました！", icon="📸")
+        with ec2:
+            if st.button("🗑️ 追加分をすべてクリア", key="t4_btn_clear"):
+                st.session_state.edit_staged_images = []
+                st.session_state.last_paste_hash_t4 = ""
+                st.rerun()
+
         edit_add_files = st.file_uploader(
-            "📁 追加する画像ファイルを選択（複数可）",
+            "📁 または画像ファイルを選択（複数可）",
             type=["jpg", "jpeg", "png", "webp"],
             accept_multiple_files=True,
             key="t4_file_uploader_add"
         )
         if edit_add_files:
-            if st.button("⬆️ 選択した画像を追加リストに反映", key="t4_btn_add_files"):
+            if st.button(
+                "⬆️ 選択した画像を追加リストに反映",
+                key="t4_btn_add_files"
+            ):
                 for eaf in edit_add_files:
                     st.session_state.edit_staged_images.append(
                         Image.open(eaf).convert("RGB")
                     )
                 st.toast("追加画像をセットしました！", icon="📸")
-
-        if st.button("🗑️ 追加分をすべてクリア", key="t4_btn_clear"):
-            st.session_state.edit_staged_images = []
-            st.rerun()
 
         new_to_add = []
         if st.session_state.edit_staged_images:
