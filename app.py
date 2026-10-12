@@ -68,7 +68,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- スマホ最適化＆スタイリッシュUI用CSS ---
 CUSTOM_CSS = """
 <style>
 .block-container {
@@ -418,14 +417,11 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "✏️ 編集"
 ])
 
-# ==========================================
-# データ読み込み（全タブ共通）
-# ==========================================
 records = worksheet.get_all_records()
 df = pd.DataFrame(records)
 
 # ==========================================
-# タブ1：サイズ比較（スマホ特化・横スクロール不要）
+# タブ1：サイズ比較
 # ==========================================
 with tab1:
     if not df.empty:
@@ -435,13 +431,15 @@ with tab1:
                 "カテゴリ",
                 ["ALL", "トップス", "アウター", "ボトムス", "その他"],
                 horizontal=True,
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                key="t1_cat_radio"
             )
         with fc2:
             view_mode = st.selectbox(
                 "表示切替",
                 ["📱 スマホ最適化カード", "📊 コンパクト表"],
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                key="t1_view_mode"
             )
 
         if sel_cat != "ALL":
@@ -546,7 +544,7 @@ with tab1:
         st.info("まだ登録データがありません。")
 
 # ==========================================
-# タブ2：クローゼット（iPhoneでも2列グリッド表示）
+# タブ2：クローゼット
 # ==========================================
 with tab2:
     if not df.empty:
@@ -555,7 +553,7 @@ with tab2:
             ["ALL", "トップス", "アウター", "ボトムス", "その他"],
             horizontal=True,
             label_visibility="collapsed",
-            key="closet_cat_radio"
+            key="t2_cat_radio"
         )
         df_c = (
             df[df["カテゴリ"] == c_cat]
@@ -615,7 +613,11 @@ with tab2:
                 for _, r in df_c.iterrows()
             ]
             if opts:
-                s_item = st.selectbox("アイテムを選択", opts)
+                s_item = st.selectbox(
+                    "アイテムを選択",
+                    opts,
+                    key="t2_detail_sel"
+                )
                 s_id = s_item.split(" | ")[0]
                 s_row = df[
                     df["アイテムID"].astype(str) == s_id
@@ -642,7 +644,8 @@ with tab3:
     with col_b1:
         if st.button(
             "📋 スクショ貼付 (PC)",
-            use_container_width=True
+            use_container_width=True,
+            key="t3_btn_paste"
         ):
             if HAS_CLIPBOARD:
                 try:
@@ -662,7 +665,8 @@ with tab3:
     with col_b2:
         if st.button(
             "📂 フォルダ一括読込 (PC)",
-            use_container_width=True
+            use_container_width=True,
+            key="t3_btn_folder"
         ):
             img_paths = []
             for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
@@ -691,13 +695,15 @@ with tab3:
         c_clear1, c_clear2 = st.columns(2)
         if c_clear1.button(
             "🗑️ クリア",
-            use_container_width=True
+            use_container_width=True,
+            key="t3_btn_clear"
         ):
             st.session_state.staged_images = []
             st.rerun()
         if c_clear2.button(
             "🧹 空にする",
-            use_container_width=True
+            use_container_width=True,
+            key="t3_btn_empty"
         ):
             for f in glob.glob(
                 os.path.join(LOCAL_INPUT_DIR, "*")
@@ -712,10 +718,13 @@ with tab3:
         "📱 iPhone・PCから画像を選択して追加（複数可）",
         type=["jpg", "jpeg", "png", "webp"],
         accept_multiple_files=True,
-        key="top_mob_uploader"
+        key="t3_mob_uploader"
     )
     if mob_files:
-        if st.button("⬆️ 選択した画像をAI読込リストに追加"):
+        if st.button(
+            "⬆️ 選択した画像をAI読込リストに追加",
+            key="t3_btn_add_mob"
+        ):
             for mf in mob_files:
                 st.session_state.staged_images.append(
                     Image.open(mf).convert("RGB")
@@ -729,7 +738,8 @@ with tab3:
         target_size = st.text_input(
             "指定サイズ (空欄なら自動)",
             value="",
-            placeholder="例: 88, L, 2XL"
+            placeholder="例: 88, L, 2XL",
+            key="t3_target_size"
         )
     with col_ai2:
         ai_model = st.selectbox(
@@ -737,7 +747,8 @@ with tab3:
             [
                 "gemini-3.8-flash (高速)",
                 "gemini-3.8-pro (高精度)"
-            ]
+            ],
+            key="t3_ai_model"
         )
         selected_model_name = (
             "gemini-3.8-flash"
@@ -747,13 +758,15 @@ with tab3:
     with col_ai3:
         auto_crop = st.checkbox(
             "✂️ 服の写真だけ自動切り抜き",
-            value=True
+            value=True,
+            key="t3_auto_crop"
         )
     with col_ai4:
         run_ai = st.button(
             "🪄 ページ全体からAI自動入力",
             type="primary",
-            use_container_width=True
+            use_container_width=True,
+            key="t3_btn_run_ai"
         )
 
     if run_ai:
@@ -918,7 +931,7 @@ with tab3:
                 if st.checkbox(
                     "💾 保存",
                     value=def_chk,
-                    key=f"save_img_{idx}"
+                    key=f"t3_save_img_{idx}"
                 ):
                     images_to_save.append(img)
 
@@ -974,7 +987,7 @@ with tab3:
                 "画像ファイルを選択",
                 type=["jpg", "jpeg", "png", "webp"],
                 accept_multiple_files=True,
-                key="file_photos"
+                key="t3_file_photos"
             )
 
         submitted = st.form_submit_button(
@@ -1029,7 +1042,9 @@ with tab4:
             options.append(f"{iid} | {br} - {inm} ({sz} / {cl})")
 
         sel_opt = st.selectbox(
-            "編集・画像追加するアイテムを選択", options
+            "編集・画像追加するアイテムを選択",
+            options,
+            key="t4_select_item"
         )
         sel_id = sel_opt.split(" | ")[0]
         sel_row = df[
@@ -1068,7 +1083,7 @@ with tab4:
                     if st.checkbox(
                         "残す",
                         value=True,
-                        key=f"keep_{sel_id}_{idx}"
+                        key=f"t4_keep_{sel_id}_{idx}"
                     ):
                         kept_existing_pils.append(e_img)
         else:
@@ -1080,7 +1095,8 @@ with tab4:
         with ec1:
             if st.button(
                 "📋 スクショ貼付 (PC)",
-                use_container_width=True
+                use_container_width=True,
+                key="t4_btn_paste"
             ):
                 if HAS_CLIPBOARD:
                     try:
@@ -1099,7 +1115,8 @@ with tab4:
         with ec2:
             if st.button(
                 "📂 フォルダ読込 (PC)",
-                use_container_width=True
+                use_container_width=True,
+                key="t4_btn_folder"
             ):
                 img_paths = []
                 for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
@@ -1123,7 +1140,8 @@ with tab4:
         with ec3:
             if st.button(
                 "🗑️ 追加分クリア",
-                use_container_width=True
+                use_container_width=True,
+                key="t4_btn_clear"
             ):
                 st.session_state.edit_staged_images = []
                 st.rerun()
@@ -1143,7 +1161,7 @@ with tab4:
                     if st.checkbox(
                         "追加する",
                         value=True,
-                        key=f"add_chk_{idx}"
+                        key=f"t4_add_chk_{idx}"
                     ):
                         new_to_add.append(n_img)
 
@@ -1153,18 +1171,21 @@ with tab4:
                 "サブ画像として末尾に追加",
                 "新しい1枚目をメイン画像にする"
             ],
-            horizontal=True
+            horizontal=True,
+            key="t4_add_mode"
         )
 
         with st.form("edit_item_form"):
             fc1, fc2, fc3, fc4 = st.columns(4)
             e_brand = fc1.text_input(
                 "ブランド名",
-                value=str(sel_row.get("ブランド", ""))
+                value=str(sel_row.get("ブランド", "")),
+                key=f"t4_br_{sel_id}"
             )
             e_name = fc2.text_input(
                 "アイテム名",
-                value=str(sel_row.get("アイテム名", ""))
+                value=str(sel_row.get("アイテム名", "")),
+                key=f"t4_nm_{sel_id}"
             )
             cat_list = ["トップス", "アウター", "ボトムス", "その他"]
             cur_cat = str(sel_row.get("カテゴリ", "トップス"))
@@ -1174,66 +1195,79 @@ with tab4:
                 else 0
             )
             e_cat = fc3.selectbox(
-                "カテゴリ", cat_list, index=cat_idx
+                "カテゴリ",
+                cat_list,
+                index=cat_idx,
+                key=f"t4_ct_{sel_id}"
             )
             e_color = fc4.text_input(
                 "色（カラー）",
-                value=str(sel_row.get("色", ""))
+                value=str(sel_row.get("色", "")),
+                key=f"t4_cl_{sel_id}"
             )
 
             sc1, sc2, sc3, sc4, sc5 = st.columns(5)
             e_size = sc1.text_input(
                 "表記サイズ",
-                value=str(sel_row.get("表記サイズ", ""))
+                value=str(sel_row.get("表記サイズ", "")),
+                key=f"t4_sz_{sel_id}"
             )
             e_len = sc2.number_input(
                 "着丈・総丈",
                 value=float(sel_row.get("着丈") or 0.0),
-                step=0.5
+                step=0.5,
+                key=f"t4_ln_{sel_id}"
             )
             e_wid = sc3.number_input(
                 "身幅",
                 value=float(sel_row.get("身幅") or 0.0),
-                step=0.5
+                step=0.5,
+                key=f"t4_wd_{sel_id}"
             )
             e_shd = sc4.number_input(
                 "肩幅",
                 value=float(sel_row.get("肩幅") or 0.0),
-                step=0.5
+                step=0.5,
+                key=f"t4_sh_{sel_id}"
             )
             e_slv = sc5.number_input(
                 "袖丈",
                 value=float(sel_row.get("袖丈") or 0.0),
-                step=0.5
+                step=0.5,
+                key=f"t4_sl_{sel_id}"
             )
 
             sc6, sc7, sc8, sc9 = st.columns(4)
             e_wst = sc6.number_input(
                 "ウエスト",
                 value=float(sel_row.get("ウエスト") or 0.0),
-                step=0.5
+                step=0.5,
+                key=f"t4_ws_{sel_id}"
             )
             e_ins = sc7.number_input(
                 "股下",
                 value=float(sel_row.get("股下") or 0.0),
-                step=0.5
+                step=0.5,
+                key=f"t4_in_{sel_id}"
             )
             e_hip = sc8.number_input(
                 "ヒップ",
                 value=float(sel_row.get("ヒップ") or 0.0),
-                step=0.5
+                step=0.5,
+                key=f"t4_hp_{sel_id}"
             )
             e_thg = sc9.number_input(
                 "わたり幅",
                 value=float(sel_row.get("わたり幅") or 0.0),
-                step=0.5
+                step=0.5,
+                key=f"t4_th_{sel_id}"
             )
 
             edit_files = st.file_uploader(
                 "📱 iPhone・ファイルから画像を追加（任意）",
                 type=["jpg", "jpeg", "png", "webp"],
                 accept_multiple_files=True,
-                key="edit_file_up"
+                key=f"t4_up_{sel_id}"
             )
 
             save_edit = st.form_submit_button(
@@ -1294,7 +1328,8 @@ with tab4:
         with st.expander("🗑️ このアイテムを削除する"):
             if st.button(
                 "本当にこのアイテムを削除する",
-                type="secondary"
+                type="secondary",
+                key=f"t4_del_{sel_id}"
             ):
                 id_col = worksheet.col_values(1)
                 if sel_id in id_col:
