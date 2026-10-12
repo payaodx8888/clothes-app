@@ -5,3 +5,4 @@ google-auth
 google-genai
 Pillow
 pydantic
+streamlit-paste-button
