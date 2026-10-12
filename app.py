@@ -20,7 +20,7 @@ except Exception:
     HAS_PASTE_BTN = False
 
 # ==========================================
-# 設定エリア
+# 設定・定数エリア
 # ==========================================
 _K1 = "AQ.Ab8RN6IHJDmDYNheq3LAZyIO"
 _K2 = "qxY6KwNa5ouLQGFCnb7uLjxAlQ"
@@ -33,11 +33,32 @@ except Exception:
 
 SPREADSHEET_NAME = "洋服管理_DB"
 
+CATEGORIES = [
+    "トップス", "アウター", "ボトムス", "靴", "小物", "その他"
+]
+USAGE_TAGS = ["私服", "仕事", "ゴルフ", "運動"]
+COLOR_GROUPS = [
+    "黒系", "白系", "グレー系", "紺・青系",
+    "茶・ベージュ系", "緑・カーキ系", "赤・暖色系", "その他"
+]
+
 EXPECTED_HEADERS = [
     "アイテムID", "ブランド", "アイテム名", "カテゴリ",
     "色", "表記サイズ", "着丈", "身幅", "肩幅", "袖丈",
     "ウエスト", "股下", "ヒップ", "わたり幅",
-    "メイン画像URL", "サブ画像URL", "登録日", "メモ"
+    "メイン画像URL", "サブ画像URL", "登録日", "メモ",
+    "用途", "購入時期"
+]
+
+ALL_M_KEYS = [
+    ("ウエスト", "W"),
+    ("股下", "股下"),
+    ("わたり幅", "わたり"),
+    ("ヒップ", "H"),
+    ("着丈", "着丈"),
+    ("身幅", "身幅"),
+    ("肩幅", "肩幅"),
+    ("袖丈", "袖丈")
 ]
 
 st.set_page_config(
@@ -51,7 +72,7 @@ CUSTOM_CSS = """
 .block-container {
     padding-top: 1.0rem !important;
     padding-bottom: 2rem !important;
-    max-width: 920px !important;
+    max-width: 940px !important;
 }
 .app-header {
     display: flex;
@@ -72,6 +93,29 @@ CUSTOM_CSS = """
     opacity: 0.55;
     letter-spacing: 0.08em;
 }
+.stat-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: rgba(128,128,128,0.08);
+    margin: 6px 0 10px 0;
+    font-size: 0.75rem;
+}
+.stat-total {
+    font-weight: 800;
+    font-size: 0.82rem;
+    margin-right: 4px;
+}
+.stat-chip {
+    padding: 2px 7px;
+    border-radius: 99px;
+    background: rgba(128,128,128,0.14);
+    font-size: 0.7rem;
+    font-weight: 600;
+}
 .spec-card {
     display: flex;
     gap: 12px;
@@ -83,8 +127,8 @@ CUSTOM_CSS = """
     align-items: center;
 }
 .spec-thumb {
-    width: 66px;
-    height: 66px;
+    width: 68px;
+    height: 68px;
     border-radius: 8px;
     object-fit: cover;
     flex-shrink: 0;
@@ -97,7 +141,7 @@ CUSTOM_CSS = """
 .spec-top {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     flex-wrap: wrap;
     margin-bottom: 3px;
 }
@@ -108,7 +152,19 @@ CUSTOM_CSS = """
     font-weight: 700;
     padding: 2px 7px;
     border-radius: 5px;
-    letter-spacing: 0.03em;
+}
+.tag-badge {
+    background: rgba(37, 99, 235, 0.14);
+    color: #3b82f6;
+    font-size: 0.66rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.date-txt {
+    font-size: 0.68rem;
+    opacity: 0.55;
+    margin-left: auto;
 }
 .brand-txt {
     font-size: 0.78rem;
@@ -145,9 +201,8 @@ CUSTOM_CSS = """
 }
 .memo-preview {
     margin-top: 5px;
-    font-size: 0.73rem;
-    color: inherit;
-    opacity: 0.82;
+    font-size: 0.72rem;
+    opacity: 0.85;
     background: rgba(255, 193, 7, 0.12);
     border-left: 3px solid #f59e0b;
     padding: 3px 7px;
@@ -265,6 +320,45 @@ class ClothInfo(BaseModel):
     crop_xmin: int = 0
     crop_ymax: int = 1000
     crop_xmax: int = 1000
+
+def normalize_color_group(raw_color: str) -> str:
+    s = str(raw_color or "").strip().upper()
+    if not s:
+        return "その他"
+    if any(k in s for k in ["黒", "ブラック", "BLACK", "BLK", "墨"]):
+        return "黒系"
+    if any(k in s for k in [
+        "白", "ホワイト", "WHITE", "WHT", "アイボリー",
+        "オフホワイト", "キナリ", "生成"
+    ]):
+        return "白系"
+    if any(k in s for k in [
+        "グレー", "グレイ", "GRAY", "GREY", "チャコール",
+        "シルバー", "杢"
+    ]):
+        return "グレー系"
+    if any(k in s for k in [
+        "紺", "ネイビー", "NAVY", "NVY", "青", "ブルー",
+        "BLUE", "サックス", "インディゴ", "デニム", "水色"
+    ]):
+        return "紺・青系"
+    if any(k in s for k in [
+        "茶", "ブラウン", "BROWN", "ベージュ", "BEIGE",
+        "キャメル", "モカ", "タン", "サンド", "チノ"
+    ]):
+        return "茶・ベージュ系"
+    if any(k in s for k in [
+        "緑", "グリーン", "GREEN", "カーキ", "KHAKI",
+        "オリーブ", "OLIVE", "セージ", "ミント"
+    ]):
+        return "緑・カーキ系"
+    if any(k in s for k in [
+        "赤", "レッド", "RED", "ピンク", "PINK", "オレンジ",
+        "ボルドー", "ワイン", "バーガンディ", "黄", "イエロー",
+        "マスタード", "パープル", "紫"
+    ]):
+        return "赤・暖色系"
+    return "その他"
 
 def prepare_image_for_ai(img: Image.Image) -> Image.Image:
     w, h = img.size
@@ -384,7 +478,7 @@ try:
     current_headers = worksheet.row_values(1)
     if current_headers != EXPECTED_HEADERS:
         worksheet.update(
-            range_name="A1:R1",
+            range_name="A1:T1",
             values=[EXPECTED_HEADERS]
         )
 except Exception as e:
@@ -401,17 +495,18 @@ def save_memo_quickly(item_id: str, new_memo: str):
 
 if "staged_images" not in st.session_state:
     st.session_state.staged_images = []
-if "edit_staged_images" not in st.session_state:
-    st.session_state.edit_staged_images = []
+if "dlg_staged_images" not in st.session_state:
+    st.session_state.dlg_staged_images = []
 if "processed_hashes_t3" not in st.session_state:
     st.session_state.processed_hashes_t3 = set()
-if "processed_hashes_t4" not in st.session_state:
-    st.session_state.processed_hashes_t4 = set()
+if "processed_hashes_dlg" not in st.session_state:
+    st.session_state.processed_hashes_dlg = set()
 if "up_key_t3" not in st.session_state:
     st.session_state.up_key_t3 = 0
-if "up_key_t4" not in st.session_state:
-    st.session_state.up_key_t4 = 0
+if "up_key_dlg" not in st.session_state:
+    st.session_state.up_key_dlg = 0
 
+default_ym = datetime.date.today().strftime("%Y-%m")
 default_form_values = {
     "f_brand": "",
     "f_item_name": "",
@@ -426,61 +521,402 @@ default_form_values = {
     "f_inseam": 0.0,
     "f_hip": 0.0,
     "f_thigh": 0.0,
-    "f_memo": ""
+    "f_memo": "",
+    "f_buy_date": default_ym
 }
 for k, v in default_form_values.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📏 サイズ比較",
-    "🖼️ クローゼット",
-    "➕ 登録",
-    "✏️ 編集"
-])
-
 records = worksheet.get_all_records()
 df = pd.DataFrame(records)
+if not df.empty:
+    for col_name in EXPECTED_HEADERS:
+        if col_name not in df.columns:
+            df[col_name] = ""
+    df["色グループ"] = df["色"].apply(normalize_color_group)
 
 # ==========================================
-# タブ1：サイズ比較
+# どこからでも開ける編集ポップアップ（モーダル）
+# ==========================================
+@st.dialog("✏️ アイテム編集・画像追加", width="large")
+def open_edit_dialog(item_id: str):
+    target_rows = df[df["アイテムID"].astype(str) == str(item_id)]
+    if target_rows.empty:
+        st.error("アイテムが見つかりません。")
+        return
+    sel_row = target_rows.iloc[0]
+
+    existing_pils = []
+    m_str = str(sel_row.get("メイン画像URL", "")).strip()
+    if m_str:
+        p_m = decode_str_to_pil(m_str)
+        if p_m:
+            existing_pils.append(p_m)
+    s_str_all = str(sel_row.get("サブ画像URL", "")).strip()
+    if s_str_all:
+        for part in s_str_all.split(","):
+            p_s = decode_str_to_pil(part)
+            if p_s:
+                existing_pils.append(p_s)
+
+    kept_existing_pils = []
+    if existing_pils:
+        e_cols = st.columns(4)
+        for idx, e_img in enumerate(existing_pils):
+            with e_cols[idx % 4]:
+                st.image(e_img, use_container_width=True)
+                lbl = "メイン残す" if idx == 0 else f"サブ#{idx}"
+                if st.checkbox(
+                    lbl,
+                    value=True,
+                    key=f"dlg_keep_{item_id}_{idx}"
+                ):
+                    kept_existing_pils.append(e_img)
+
+    dlg_files = st.file_uploader(
+        "📁 画像を追加",
+        type=["jpg", "jpeg", "png", "webp"],
+        accept_multiple_files=True,
+        key=f"dlg_up_{st.session_state.up_key_dlg}"
+    )
+    if dlg_files:
+        for df_f in dlg_files:
+            raw_b = df_f.getvalue()
+            h_v = hashlib.md5(raw_b).hexdigest()
+            if h_v not in st.session_state.processed_hashes_dlg:
+                st.session_state.processed_hashes_dlg.add(h_v)
+                st.session_state.dlg_staged_images.append(
+                    Image.open(io.BytesIO(raw_b)).convert("RGB")
+                )
+
+    db1, db2, db3 = st.columns([1.2, 1, 1.8])
+    with db1:
+        if HAS_PASTE_BTN:
+            p_dlg = paste_image_button(
+                label="📋 スクショ貼付",
+                background_color="#2563eb",
+                hover_background_color="#1d4ed8",
+                key=f"dlg_paste_{st.session_state.up_key_dlg}"
+            )
+            if p_dlg.image_data is not None:
+                b_io = io.BytesIO()
+                p_dlg.image_data.save(b_io, format="PNG")
+                h_p = hashlib.md5(b_io.getvalue()).hexdigest()
+                if h_p not in st.session_state.processed_hashes_dlg:
+                    st.session_state.processed_hashes_dlg.add(h_p)
+                    st.session_state.dlg_staged_images.append(
+                        p_dlg.image_data.convert("RGB")
+                    )
+    with db2:
+        if st.button(
+            "🗑️ 追加クリア",
+            use_container_width=True,
+            key=f"dlg_clr_{item_id}"
+        ):
+            st.session_state.dlg_staged_images = []
+            st.session_state.processed_hashes_dlg = set()
+            st.session_state.up_key_dlg += 1
+            st.rerun()
+    with db3:
+        add_mode = st.radio(
+            "追加位置",
+            ["サブに追加", "メインに差替"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key=f"dlg_mode_{item_id}"
+        )
+
+    new_to_add = []
+    if st.session_state.dlg_staged_images:
+        n_cols = st.columns(4)
+        for idx, n_img in enumerate(
+            st.session_state.dlg_staged_images
+        ):
+            with n_cols[idx % 4]:
+                st.image(n_img, use_container_width=True)
+                if st.checkbox(
+                    f"追加 #{idx+1}",
+                    value=True,
+                    key=f"dlg_add_chk_{item_id}_{idx}"
+                ):
+                    new_to_add.append(n_img)
+
+    cur_usages = [
+        u.strip()
+        for u in str(sel_row.get("用途", "")).split(",")
+        if u.strip()
+    ]
+
+    with st.form(f"dlg_form_{item_id}"):
+        fc1, fc2, fc3 = st.columns([1.2, 1.5, 1])
+        e_brand = fc1.text_input(
+            "ブランド",
+            value=str(sel_row.get("ブランド", ""))
+        )
+        e_name = fc2.text_input(
+            "アイテム名",
+            value=str(sel_row.get("アイテム名", ""))
+        )
+        e_buy = fc3.text_input(
+            "購入時期",
+            value=str(sel_row.get("購入時期", "")),
+            placeholder="例: 2026-10"
+        )
+
+        fc4, fc5, fc6 = st.columns(3)
+        cur_cat = str(sel_row.get("カテゴリ", "トップス"))
+        cat_idx = (
+            CATEGORIES.index(cur_cat)
+            if cur_cat in CATEGORIES
+            else 0
+        )
+        e_cat = fc4.selectbox(
+            "カテゴリ", CATEGORIES, index=cat_idx
+        )
+        e_color = fc5.text_input(
+            "色",
+            value=str(sel_row.get("色", ""))
+        )
+        e_size = fc6.text_input(
+            "サイズ",
+            value=str(sel_row.get("表記サイズ", ""))
+        )
+
+        st.caption("用途タグ（複数選択可）")
+        u_cols = st.columns(4)
+        selected_usages = []
+        for idx_u, u_name in enumerate(USAGE_TAGS):
+            if u_cols[idx_u].checkbox(
+                u_name,
+                value=(u_name in cur_usages),
+                key=f"dlg_u_{item_id}_{u_name}"
+            ):
+                selected_usages.append(u_name)
+
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        e_len = sc1.number_input(
+            "着丈",
+            value=float(sel_row.get("着丈") or 0.0),
+            step=0.5
+        )
+        e_wid = sc2.number_input(
+            "身幅",
+            value=float(sel_row.get("身幅") or 0.0),
+            step=0.5
+        )
+        e_shd = sc3.number_input(
+            "肩幅",
+            value=float(sel_row.get("肩幅") or 0.0),
+            step=0.5
+        )
+        e_slv = sc4.number_input(
+            "袖丈",
+            value=float(sel_row.get("袖丈") or 0.0),
+            step=0.5
+        )
+
+        sc5, sc6, sc7, sc8 = st.columns(4)
+        e_wst = sc5.number_input(
+            "ウエスト",
+            value=float(sel_row.get("ウエスト") or 0.0),
+            step=0.5
+        )
+        e_ins = sc6.number_input(
+            "股下",
+            value=float(sel_row.get("股下") or 0.0),
+            step=0.5
+        )
+        e_hip = sc7.number_input(
+            "ヒップ",
+            value=float(sel_row.get("ヒップ") or 0.0),
+            step=0.5
+        )
+        e_thg = sc8.number_input(
+            "わたり幅",
+            value=float(sel_row.get("わたり幅") or 0.0),
+            step=0.5
+        )
+
+        e_memo = st.text_area(
+            "メモ",
+            value=str(sel_row.get("メモ") or ""),
+            height=60
+        )
+
+        save_btn = st.form_submit_button(
+            "💾 変更を保存する",
+            type="primary",
+            use_container_width=True
+        )
+        if save_btn:
+            with st.spinner("更新中..."):
+                if "メイン" in add_mode:
+                    final_imgs = new_to_add + kept_existing_pils
+                else:
+                    final_imgs = kept_existing_pils + new_to_add
+
+                new_main, new_sub = pack_images_for_row(
+                    final_imgs
+                )
+                id_col = worksheet.col_values(1)
+                if str(item_id) in id_col:
+                    row_num = id_col.index(str(item_id)) + 1
+                    reg_date = str(
+                        sel_row.get(
+                            "登録日",
+                            str(datetime.date.today())
+                        )
+                    )
+                    updated_row = [
+                        str(item_id), e_brand, e_name, e_cat,
+                        e_color, e_size, e_len, e_wid,
+                        e_shd, e_slv, e_wst, e_ins,
+                        e_hip, e_thg, new_main,
+                        new_sub, reg_date, e_memo,
+                        ",".join(selected_usages), e_buy
+                    ]
+                    worksheet.update(
+                        range_name=f"A{row_num}:T{row_num}",
+                        values=[updated_row]
+                    )
+                    st.session_state.dlg_staged_images = []
+                    st.session_state.processed_hashes_dlg = set()
+                    st.session_state.up_key_dlg += 1
+                    st.rerun()
+
+    if st.button(
+        "🗑️ このアイテムを削除する",
+        type="secondary",
+        use_container_width=True,
+        key=f"dlg_del_{item_id}"
+    ):
+        id_col = worksheet.col_values(1)
+        if str(item_id) in id_col:
+            row_num = id_col.index(str(item_id)) + 1
+            worksheet.delete_rows(row_num)
+            st.rerun()
+
+# ==========================================
+# 共通フィルター＆集計バー関数
+# ==========================================
+def filter_and_sort_df(base_df: pd.DataFrame, prefix: str):
+    r1_c1, r1_c2 = st.columns([1.8, 1.2])
+    with r1_c1:
+        sel_cat = st.selectbox(
+            "カテゴリ",
+            ["カテゴリ: ALL"] + CATEGORIES,
+            label_visibility="collapsed",
+            key=f"{prefix}_cat"
+        )
+    with r1_c2:
+        sel_usage = st.selectbox(
+            "用途",
+            ["用途: ALL"] + USAGE_TAGS,
+            label_visibility="collapsed",
+            key=f"{prefix}_usage"
+        )
+
+    r2_c1, r2_c2, r2_c3 = st.columns([1.2, 1.3, 1])
+    with r2_c1:
+        sel_col = st.selectbox(
+            "色グループ",
+            ["色: ALL"] + COLOR_GROUPS,
+            label_visibility="collapsed",
+            key=f"{prefix}_col"
+        )
+    with r2_c2:
+        sort_by = st.selectbox(
+            "並び替え",
+            [
+                "並替: 登録が新しい順",
+                "並替: ブランド順",
+                "並替: 色グループ順",
+                "並替: 購入が古い順",
+                "並替: 購入が新しい順"
+            ],
+            label_visibility="collapsed",
+            key=f"{prefix}_sort"
+        )
+    with r2_c3:
+        view_mode = st.selectbox(
+            "表示",
+            ["📱 カード", "📊 表"],
+            label_visibility="collapsed",
+            key=f"{prefix}_view"
+        )
+
+    out = base_df.copy()
+    if sel_cat != "カテゴリ: ALL":
+        out = out[out["カテゴリ"] == sel_cat]
+    if sel_usage != "用途: ALL":
+        out = out[
+            out["用途"].astype(str).apply(
+                lambda x: sel_usage in [
+                    t.strip() for t in x.split(",")
+                ]
+            )
+        ]
+    if sel_col != "色: ALL":
+        out = out[out["色グループ"] == sel_col]
+
+    if "ブランド順" in sort_by:
+        out = out.sort_values(
+            by=["ブランド", "アイテム名"],
+            ascending=[True, True]
+        )
+    elif "色グループ順" in sort_by:
+        out = out.sort_values(
+            by=["色グループ", "ブランド"],
+            ascending=[True, True]
+        )
+    elif "購入が古い順" in sort_by:
+        out = out.sort_values(
+            by=["購入時期", "登録日"],
+            ascending=[True, True]
+        )
+    elif "購入が新しい順" in sort_by:
+        out = out.sort_values(
+            by=["購入時期", "登録日"],
+            ascending=[False, False]
+        )
+    else:
+        out = out.iloc[::-1]
+
+    # 所持数＆色別内訳カウンター表示
+    total_cnt = len(out)
+    col_counts = out["色グループ"].value_counts()
+    chips = []
+    for cg, cnt in col_counts.items():
+        if cnt > 0:
+            chips.append(
+                f'<span class="stat-chip">{cg} {cnt}</span>'
+            )
+    stat_html = (
+        f'<div class="stat-bar">'
+        f'<span class="stat-total">📦 合計 {total_cnt}点</span>'
+        f'{"".join(chips)}</div>'
+    )
+    st.markdown(stat_html, unsafe_allow_html=True)
+
+    return out, sel_cat, view_mode
+
+tab1, tab2, tab3 = st.tabs([
+    "📏 一覧・サイズ比較",
+    "🖼️ クローゼット",
+    "➕ 登録"
+])
+
+# ==========================================
+# タブ1：一覧・サイズ比較（カード / 表）
 # ==========================================
 with tab1:
     if not df.empty:
-        fc1, fc2 = st.columns([2, 1])
-        with fc1:
-            sel_cat = st.radio(
-                "カテゴリ",
-                ["ALL", "トップス", "アウター", "ボトムス", "その他"],
-                horizontal=True,
-                label_visibility="collapsed",
-                key="t1_cat_radio"
-            )
-        with fc2:
-            view_mode = st.selectbox(
-                "表示切替",
-                ["📱 カード", "📊 表"],
-                label_visibility="collapsed",
-                key="t1_view_mode"
-            )
-
-        df_f = (
-            df[df["カテゴリ"] == sel_cat]
-            if sel_cat != "ALL"
-            else df
+        df_f, sel_cat_val, view_mode = filter_and_sort_df(
+            df, "t1"
         )
 
         if "📱" in view_mode:
-            m_keys = [
-                ("ウエスト", "W"),
-                ("股下", "股下"),
-                ("わたり幅", "わたり"),
-                ("ヒップ", "H"),
-                ("着丈", "着丈"),
-                ("身幅", "身幅"),
-                ("肩幅", "肩幅"),
-                ("袖丈", "袖丈")
-            ]
             for idx, r in df_f.iterrows():
                 iid = str(r.get("アイテムID", f"row_{idx}"))
                 m_raw = str(r.get("メイン画像URL", "")).strip()
@@ -509,10 +945,28 @@ with tab1:
                 )
                 cl = html.escape(str(r.get("色") or ""))
                 cl_str = f"({cl})" if cl else ""
-                cur_memo = str(r.get("メモ") or "").strip()
+                buy_d = html.escape(
+                    str(r.get("購入時期") or "")
+                )
+                buy_html = (
+                    f'<span class="date-txt">🗓️ {buy_d}</span>'
+                    if buy_d
+                    else ""
+                )
+
+                u_list = [
+                    u.strip()
+                    for u in str(r.get("用途", "")).split(",")
+                    if u.strip()
+                ]
+                u_badges = "".join([
+                    f'<span class="tag-badge">'
+                    f'{html.escape(u)}</span>'
+                    for u in u_list
+                ])
 
                 pills = []
-                for col_k, short_k in m_keys:
+                for col_k, short_k in ALL_M_KEYS:
                     val_s = fmt_num(r.get(col_k, 0))
                     if val_s:
                         pills.append(
@@ -521,6 +975,7 @@ with tab1:
                         )
                 pills_html = "".join(pills)
 
+                cur_memo = str(r.get("メモ") or "").strip()
                 memo_html = (
                     f'<div class="memo-preview">'
                     f'📝 {html.escape(cur_memo)}</div>'
@@ -535,6 +990,7 @@ with tab1:
                     f'<span class="sz-badge">{sz}</span>'
                     f'<span class="brand-txt">{br}</span>'
                     f'<span class="color-txt">{cl_str}</span>'
+                    f'{u_badges}{buy_html}'
                     f'</div>'
                     f'<div class="item-txt">{nm}</div>'
                     f'<div class="metrics-wrap">'
@@ -544,75 +1000,140 @@ with tab1:
                 )
                 st.markdown(card_html, unsafe_allow_html=True)
 
-                with st.expander(
-                    f"📸 写真({total_imgs})・メモ"
-                ):
-                    all_img_strs = []
-                    if m_raw:
-                        all_img_strs.append(("メイン", m_raw))
-                    for s_i, s_u in enumerate(sub_list):
-                        all_img_strs.append(
-                            (f"サブ #{s_i+1}", s_u)
-                        )
-
-                    if all_img_strs:
-                        img_cols = st.columns(2)
-                        for p_i, (cap_t, u_str) in enumerate(
-                            all_img_strs
-                        ):
-                            with img_cols[p_i % 2]:
-                                show_saved_image(u_str, cap_t)
-
-                    new_memo_val = st.text_area(
-                        "📝 メモ",
-                        value=cur_memo,
-                        height=68,
-                        label_visibility="collapsed",
-                        placeholder="メモを入力...",
-                        key=f"t1_memo_in_{iid}_{idx}"
-                    )
+                b_col1, b_col2 = st.columns([3.2, 1])
+                with b_col2:
                     if st.button(
-                        "💾 メモ保存",
-                        key=f"t1_memo_btn_{iid}_{idx}",
-                        type="primary"
+                        "✏️ 編集",
+                        key=f"t1_ed_{iid}_{idx}",
+                        use_container_width=True
                     ):
-                        if save_memo_quickly(iid, new_memo_val):
-                            st.toast("保存しました", icon="📝")
-                            time.sleep(0.4)
-                            st.rerun()
+                        open_edit_dialog(iid)
+                with b_col1:
+                    with st.expander(
+                        f"📸 写真({total_imgs})・メモ"
+                    ):
+                        all_img_strs = []
+                        if m_raw:
+                            all_img_strs.append(("メイン", m_raw))
+                        for s_i, s_u in enumerate(sub_list):
+                            all_img_strs.append(
+                                (f"サブ #{s_i+1}", s_u)
+                            )
+
+                        if all_img_strs:
+                            img_cols = st.columns(2)
+                            for p_i, (cap_t, u_str) in enumerate(
+                                all_img_strs
+                            ):
+                                with img_cols[p_i % 2]:
+                                    show_saved_image(u_str, cap_t)
+
+                        new_memo_val = st.text_area(
+                            "📝 メモ",
+                            value=cur_memo,
+                            height=64,
+                            label_visibility="collapsed",
+                            placeholder="メモを入力...",
+                            key=f"t1_memo_in_{iid}_{idx}"
+                        )
+                        if st.button(
+                            "💾 メモ保存",
+                            key=f"t1_memo_btn_{iid}_{idx}",
+                            type="primary"
+                        ):
+                            if save_memo_quickly(iid, new_memo_val):
+                                st.toast("保存しました", icon="📝")
+                                time.sleep(0.4)
+                                st.rerun()
         else:
-            if sel_cat == "ボトムス":
+            st.caption(
+                "👆 表の左端（行）をタップすると、下に写真と編集ボタンが開きます"
+            )
+            df_reset = df_f.reset_index(drop=True)
+            if sel_cat_val == "ボトムス":
                 t_cols = [
-                    "表記サイズ", "アイテム名", "ブランド",
-                    "色", "ウエスト", "股下", "わたり幅",
-                    "ヒップ", "着丈", "メモ"
+                    "表記サイズ", "ブランド", "アイテム名",
+                    "色", "用途", "ウエスト", "股下",
+                    "わたり幅", "ヒップ", "購入時期", "メモ"
                 ]
-            elif sel_cat in ["トップス", "アウター"]:
+            elif sel_cat_val in ["トップス", "アウター"]:
                 t_cols = [
-                    "表記サイズ", "アイテム名", "ブランド",
-                    "色", "着丈", "身幅", "肩幅", "袖丈", "メモ"
+                    "表記サイズ", "ブランド", "アイテム名",
+                    "色", "用途", "着丈", "身幅",
+                    "肩幅", "袖丈", "購入時期", "メモ"
+                ]
+            elif sel_cat_val in ["靴", "小物"]:
+                t_cols = [
+                    "表記サイズ", "ブランド", "アイテム名",
+                    "色", "用途", "購入時期", "メモ"
                 ]
             else:
                 t_cols = [
-                    "表記サイズ", "アイテム名", "ブランド",
-                    "色", "着丈", "身幅", "肩幅", "袖丈",
-                    "ウエスト", "股下", "わたり幅",
-                    "ヒップ", "メモ"
+                    "表記サイズ", "カテゴリ", "ブランド",
+                    "アイテム名", "色", "用途", "着丈", "身幅",
+                    "ウエスト", "股下", "購入時期", "メモ"
                 ]
             disp_cols = [
-                c for c in t_cols if c in df_f.columns
+                c for c in t_cols if c in df_reset.columns
             ]
-            df_show = df_f[disp_cols].rename(
+            df_show = df_reset[disp_cols].rename(
                 columns={
                     "表記サイズ": "サイズ",
                     "わたり幅": "わたり"
                 }
             )
-            st.dataframe(
+            event = st.dataframe(
                 df_show,
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="t1_table_select"
             )
+            sel_rows = event.selection.rows
+            if sel_rows:
+                s_idx = sel_rows[0]
+                s_row = df_reset.iloc[s_idx]
+                s_id = str(s_row.get("アイテムID", ""))
+                with st.container(border=True):
+                    tc1, tc2 = st.columns([3, 1])
+                    tc1.markdown(
+                        f"**{s_row.get('ブランド')} - "
+                        f"{s_row.get('アイテム名')}** "
+                        f"({s_row.get('表記サイズ')} / "
+                        f"{s_row.get('色')})"
+                    )
+                    if tc2.button(
+                        "✏️ このアイテムを編集",
+                        type="primary",
+                        use_container_width=True,
+                        key=f"tbl_ed_{s_id}"
+                    ):
+                        open_edit_dialog(s_id)
+
+                    m_u = str(
+                        s_row.get("メイン画像URL", "")
+                    ).strip()
+                    s_u_list = [
+                        x.strip()
+                        for x in str(
+                            s_row.get("サブ画像URL", "")
+                        ).split(",")
+                        if x.strip()
+                    ]
+                    all_u = []
+                    if m_u:
+                        all_u.append(("メイン", m_u))
+                    for idx_s, su in enumerate(s_u_list):
+                        all_u.append((f"サブ #{idx_s+1}", su))
+
+                    if all_u:
+                        g_cols = st.columns(3)
+                        for i_u, (cap_u, u_val) in enumerate(
+                            all_u
+                        ):
+                            with g_cols[i_u % 3]:
+                                show_saved_image(u_val, cap_u)
     else:
         st.info("データがありません。")
 
@@ -621,18 +1142,42 @@ with tab1:
 # ==========================================
 with tab2:
     if not df.empty:
-        c_cat = st.radio(
-            "絞り込み",
-            ["ALL", "トップス", "アウター", "ボトムス", "その他"],
-            horizontal=True,
-            label_visibility="collapsed",
-            key="t2_cat_radio"
-        )
-        df_c = (
-            df[df["カテゴリ"] == c_cat]
-            if c_cat != "ALL"
-            else df
-        )
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            c_cat = st.selectbox(
+                "カテゴリ",
+                ["カテゴリ: ALL"] + CATEGORIES,
+                label_visibility="collapsed",
+                key="t2_cat"
+            )
+        with tc2:
+            c_use = st.selectbox(
+                "用途",
+                ["用途: ALL"] + USAGE_TAGS,
+                label_visibility="collapsed",
+                key="t2_use"
+            )
+        with tc3:
+            c_col = st.selectbox(
+                "色",
+                ["色: ALL"] + COLOR_GROUPS,
+                label_visibility="collapsed",
+                key="t2_col"
+            )
+
+        df_c = df.copy()
+        if c_cat != "カテゴリ: ALL":
+            df_c = df_c[df_c["カテゴリ"] == c_cat]
+        if c_use != "用途: ALL":
+            df_c = df_c[
+                df_c["用途"].astype(str).apply(
+                    lambda x: c_use in [
+                        t.strip() for t in x.split(",")
+                    ]
+                )
+            ]
+        if c_col != "色: ALL":
+            df_c = df_c[df_c["色グループ"] == c_col]
 
         grid_items = ['<div class="closet-grid">']
         for _, r in df_c.iterrows():
@@ -696,11 +1241,81 @@ with tab2:
             "".join(grid_items),
             unsafe_allow_html=True
         )
+
+        st.write("")
+        with st.expander(
+            "🔍 アイテムの詳細・サブ画像・編集を開く",
+            expanded=True
+        ):
+            opts = [
+                f"{r.get('アイテムID')} | "
+                f"{r.get('ブランド')} - {r.get('アイテム名')} "
+                f"({r.get('表記サイズ')})"
+                for _, r in df_c.iterrows()
+            ]
+            if opts:
+                dc1, dc2 = st.columns([3, 1])
+                s_item = dc1.selectbox(
+                    "アイテムを選択",
+                    opts,
+                    label_visibility="collapsed",
+                    key="t2_detail_sel"
+                )
+                s_id = s_item.split(" | ")[0]
+                if dc2.button(
+                    "✏️ 編集する",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"t2_ed_btn_{s_id}"
+                ):
+                    open_edit_dialog(s_id)
+
+                s_row = df[
+                    df["アイテムID"].astype(str) == s_id
+                ].iloc[0]
+
+                d_pills = []
+                for col_k, short_k in ALL_M_KEYS:
+                    val_s = fmt_num(s_row.get(col_k, 0))
+                    if val_s:
+                        d_pills.append(
+                            f'<span class="m-pill">'
+                            f'{short_k} <b>{val_s}cm</b></span>'
+                        )
+                if d_pills:
+                    st.markdown(
+                        f'<div class="metrics-wrap" '
+                        f'style="margin-bottom:8px;">'
+                        f'{"".join(d_pills)}</div>',
+                        unsafe_allow_html=True
+                    )
+
+                m_u = str(
+                    s_row.get("メイン画像URL", "")
+                ).strip()
+                s_u_list = [
+                    x.strip()
+                    for x in str(
+                        s_row.get("サブ画像URL", "")
+                    ).split(",")
+                    if x.strip()
+                ]
+                all_u = []
+                if m_u:
+                    all_u.append(("メイン", m_u))
+                for idx_s, su in enumerate(s_u_list):
+                    all_u.append((f"サブ #{idx_s+1}", su))
+
+                if all_u:
+                    g_cols = st.columns(2)
+                    for i_u, (cap_u, u_val) in enumerate(all_u):
+                        with g_cols[i_u % 2]:
+                            show_saved_image(u_val, cap_u)
     else:
         st.info("データがありません。")
 
 # ==========================================
-# タブ3：新規アイテム登録（案A：アルバム選択＋PCワンクリック貼付）
+# タブ3：新規アイテム登録
 # ==========================================
 with tab3:
     reg_files = st.file_uploader(
@@ -780,7 +1395,7 @@ with tab3:
             key="t3_ai_model"
         )
         auto_crop = ac2.checkbox(
-            "✂️ 服の写真だけ自動切り抜き",
+            "✂️ 商品写真だけ自動切り抜き",
             value=True,
             key="t3_auto_crop"
         )
@@ -799,25 +1414,25 @@ with tab3:
                     s_cond = (
                         f"サイズ「{target_size}」の数値を抽出。"
                         if target_size.strip()
-                        else "代表サイズ（88, 34, L等）を抽出し"
+                        else "代表サイズ（88, 27.5, L等）を抽出し"
                              " detected_size_label に入れる。"
                     )
                     prompt = (
-                        "通販スクショから以下を抽出してください。\n"
+                        "スクショから以下を抽出してください。\n"
                         "1. brand, item_name, category"
-                        "（トップス/アウター/ボトムス/その他）\n"
+                        "（トップス/アウター/ボトムス/靴/小物/その他）\n"
                         "2. color：文字表記を最優先、なければ"
                         "写真の見た目から色名を判断。\n"
                         f"3. {s_cond}\n"
-                        "4. サイズルール：88や34等の数値は"
+                        "4. サイズルール：88や27.5等の数値は"
                         "勝手にL等に変えず数値のままにする。"
                         "XXLや2Lは2XLに、XXXLや3Lは3XLに統一。\n"
                         "5. 採寸(cm)：length, width, shoulder,"
                         " sleeve, waist, inseam, hip, thigh。"
                         "該当なしは0。\n"
-                        "6. 写真切り抜き：メインの服の大きな写真が"
+                        "6. 写真切り抜き：メイン商品の大きな写真が"
                         "ある画像番号(0始まり)をcrop_image_indexに、"
-                        "文字や余白やUIを除いた服の写真枠のみの"
+                        "文字や余白やUIを除いた商品写真枠のみの"
                         "座標(0〜1000)をcrop_ymin, crop_xmin,"
                         " crop_ymax, crop_xmaxに指定。"
                     )
@@ -861,11 +1476,7 @@ with tab3:
 
                     st.session_state.f_brand = result.brand
                     st.session_state.f_item_name = result.item_name
-                    valid_cats = [
-                        "トップス", "アウター",
-                        "ボトムス", "その他"
-                    ]
-                    if result.category in valid_cats:
+                    if result.category in CATEGORIES:
                         st.session_state.f_category = (
                             result.category
                         )
@@ -937,18 +1548,32 @@ with tab3:
                     images_to_save.append(img)
 
     with st.form("register_form"):
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns([1.2, 1.5, 1])
         brand = c1.text_input("ブランド", key="f_brand")
         item_name = c2.text_input("アイテム名", key="f_item_name")
-
-        c3, c4, c5 = st.columns(3)
-        category = c3.selectbox(
-            "カテゴリ",
-            ["トップス", "アウター", "ボトムス", "その他"],
-            key="f_category"
+        buy_date = c3.text_input(
+            "購入時期",
+            placeholder="例: 2026-10",
+            key="f_buy_date"
         )
-        color = c4.text_input("色", key="f_color")
-        size_label = c5.text_input("サイズ", key="f_size_label")
+
+        c4, c5, c6 = st.columns(3)
+        category = c4.selectbox(
+            "カテゴリ", CATEGORIES, key="f_category"
+        )
+        color = c5.text_input("色", key="f_color")
+        size_label = c6.text_input("サイズ", key="f_size_label")
+
+        st.caption("用途タグ（複数選択可）")
+        u_cols = st.columns(4)
+        reg_usages = []
+        for idx_u, u_name in enumerate(USAGE_TAGS):
+            if u_cols[idx_u].checkbox(
+                u_name,
+                value=(u_name == "私服"),
+                key=f"t3_u_{u_name}"
+            ):
+                reg_usages.append(u_name)
 
         sc1, sc2, sc3, sc4 = st.columns(4)
         length = sc1.number_input(
@@ -1004,7 +1629,9 @@ with tab3:
                     main_img_data,
                     sub_img_str,
                     str(datetime.date.today()),
-                    memo
+                    memo,
+                    ",".join(reg_usages),
+                    buy_date
                 ]
                 worksheet.append_row(new_row)
                 st.session_state.staged_images = []
@@ -1013,288 +1640,3 @@ with tab3:
                 st.success("保存しました！")
                 time.sleep(0.6)
                 st.rerun()
-
-# ==========================================
-# タブ4：編集・画像追加
-# ==========================================
-with tab4:
-    if df.empty:
-        st.info("データがありません。")
-    else:
-        options = [
-            f"{r.get('アイテムID')} | "
-            f"{r.get('ブランド')} - {r.get('アイテム名')} "
-            f"({r.get('表記サイズ')})"
-            for _, r in df.iterrows()
-        ]
-        sel_opt = st.selectbox(
-            "対象アイテム",
-            options,
-            label_visibility="collapsed",
-            key="t4_select_item"
-        )
-        sel_id = sel_opt.split(" | ")[0]
-        sel_row = df[
-            df["アイテムID"].astype(str) == sel_id
-        ].iloc[0]
-
-        existing_pils = []
-        m_str = str(sel_row.get("メイン画像URL", "")).strip()
-        if m_str:
-            p_m = decode_str_to_pil(m_str)
-            if p_m:
-                existing_pils.append(p_m)
-        s_str_all = str(sel_row.get("サブ画像URL", "")).strip()
-        if s_str_all:
-            for part in s_str_all.split(","):
-                p_s = decode_str_to_pil(part)
-                if p_s:
-                    existing_pils.append(p_s)
-
-        kept_existing_pils = []
-        if existing_pils:
-            e_cols = st.columns(4)
-            for idx, e_img in enumerate(existing_pils):
-                with e_cols[idx % 4]:
-                    st.image(e_img, use_container_width=True)
-                    lbl = "メイン残す" if idx == 0 else f"サブ#{idx}"
-                    if st.checkbox(
-                        lbl,
-                        value=True,
-                        key=f"t4_keep_{sel_id}_{idx}"
-                    ):
-                        kept_existing_pils.append(e_img)
-
-        edit_add_files = st.file_uploader(
-            "📁 追加する画像を選択",
-            type=["jpg", "jpeg", "png", "webp"],
-            accept_multiple_files=True,
-            key=f"t4_up_{st.session_state.up_key_t4}"
-        )
-        if edit_add_files:
-            for eaf in edit_add_files:
-                raw_b4 = eaf.getvalue()
-                h4 = hashlib.md5(raw_b4).hexdigest()
-                if h4 not in st.session_state.processed_hashes_t4:
-                    st.session_state.processed_hashes_t4.add(h4)
-                    st.session_state.edit_staged_images.append(
-                        Image.open(io.BytesIO(raw_b4)).convert("RGB")
-                    )
-
-        eb1, eb2, eb3 = st.columns([1.2, 1, 1.8])
-        with eb1:
-            if HAS_PASTE_BTN:
-                p_res4 = paste_image_button(
-                    label="📋 スクショ貼付",
-                    background_color="#2563eb",
-                    hover_background_color="#1d4ed8",
-                    key=f"t4_paste_{st.session_state.up_key_t4}"
-                )
-                if p_res4.image_data is not None:
-                    b_io4 = io.BytesIO()
-                    p_res4.image_data.save(b_io4, format="PNG")
-                    h_p4 = hashlib.md5(
-                        b_io4.getvalue()
-                    ).hexdigest()
-                    if h_p4 not in st.session_state.processed_hashes_t4:
-                        st.session_state.processed_hashes_t4.add(h_p4)
-                        st.session_state.edit_staged_images.append(
-                            p_res4.image_data.convert("RGB")
-                        )
-            else:
-                st.button(
-                    "📋 貼付(要Reboot)",
-                    disabled=True,
-                    use_container_width=True,
-                    key="t4_paste_disabled"
-                )
-        with eb2:
-            if st.button(
-                "🗑️ 追加クリア",
-                use_container_width=True,
-                key="t4_btn_clear"
-            ):
-                st.session_state.edit_staged_images = []
-                st.session_state.processed_hashes_t4 = set()
-                st.session_state.up_key_t4 += 1
-                st.rerun()
-        with eb3:
-            add_mode = st.radio(
-                "追加位置",
-                ["サブに追加", "メインに差替"],
-                horizontal=True,
-                label_visibility="collapsed",
-                key="t4_add_mode"
-            )
-
-        new_to_add = []
-        if st.session_state.edit_staged_images:
-            n_cols = st.columns(4)
-            for idx, n_img in enumerate(
-                st.session_state.edit_staged_images
-            ):
-                with n_cols[idx % 4]:
-                    st.image(n_img, use_container_width=True)
-                    if st.checkbox(
-                        f"追加 #{idx+1}",
-                        value=True,
-                        key=f"t4_add_chk_{idx}"
-                    ):
-                        new_to_add.append(n_img)
-
-        with st.form("edit_item_form"):
-            fc1, fc2 = st.columns(2)
-            e_brand = fc1.text_input(
-                "ブランド",
-                value=str(sel_row.get("ブランド", "")),
-                key=f"t4_br_{sel_id}"
-            )
-            e_name = fc2.text_input(
-                "アイテム名",
-                value=str(sel_row.get("アイテム名", "")),
-                key=f"t4_nm_{sel_id}"
-            )
-
-            fc3, fc4, fc5 = st.columns(3)
-            cat_list = ["トップス", "アウター", "ボトムス", "その他"]
-            cur_cat = str(sel_row.get("カテゴリ", "トップス"))
-            cat_idx = (
-                cat_list.index(cur_cat)
-                if cur_cat in cat_list
-                else 0
-            )
-            e_cat = fc3.selectbox(
-                "カテゴリ",
-                cat_list,
-                index=cat_idx,
-                key=f"t4_ct_{sel_id}"
-            )
-            e_color = fc4.text_input(
-                "色",
-                value=str(sel_row.get("色", "")),
-                key=f"t4_cl_{sel_id}"
-            )
-            e_size = fc5.text_input(
-                "サイズ",
-                value=str(sel_row.get("表記サイズ", "")),
-                key=f"t4_sz_{sel_id}"
-            )
-
-            sc1, sc2, sc3, sc4 = st.columns(4)
-            e_len = sc1.number_input(
-                "着丈",
-                value=float(sel_row.get("着丈") or 0.0),
-                step=0.5,
-                key=f"t4_ln_{sel_id}"
-            )
-            e_wid = sc2.number_input(
-                "身幅",
-                value=float(sel_row.get("身幅") or 0.0),
-                step=0.5,
-                key=f"t4_wd_{sel_id}"
-            )
-            e_shd = sc3.number_input(
-                "肩幅",
-                value=float(sel_row.get("肩幅") or 0.0),
-                step=0.5,
-                key=f"t4_sh_{sel_id}"
-            )
-            e_slv = sc4.number_input(
-                "袖丈",
-                value=float(sel_row.get("袖丈") or 0.0),
-                step=0.5,
-                key=f"t4_sl_{sel_id}"
-            )
-
-            sc5, sc6, sc7, sc8 = st.columns(4)
-            e_wst = sc5.number_input(
-                "ウエスト",
-                value=float(sel_row.get("ウエスト") or 0.0),
-                step=0.5,
-                key=f"t4_ws_{sel_id}"
-            )
-            e_ins = sc6.number_input(
-                "股下",
-                value=float(sel_row.get("股下") or 0.0),
-                step=0.5,
-                key=f"t4_in_{sel_id}"
-            )
-            e_hip = sc7.number_input(
-                "ヒップ",
-                value=float(sel_row.get("ヒップ") or 0.0),
-                step=0.5,
-                key=f"t4_hp_{sel_id}"
-            )
-            e_thg = sc8.number_input(
-                "わたり幅",
-                value=float(sel_row.get("わたり幅") or 0.0),
-                step=0.5,
-                key=f"t4_th_{sel_id}"
-            )
-
-            e_memo = st.text_area(
-                "メモ",
-                value=str(sel_row.get("メモ") or ""),
-                height=60,
-                key=f"t4_mm_{sel_id}"
-            )
-
-            save_edit = st.form_submit_button(
-                "💾 更新する",
-                type="primary",
-                use_container_width=True
-            )
-
-            if save_edit:
-                with st.spinner("更新中..."):
-                    if "メイン" in add_mode:
-                        final_imgs = (
-                            new_to_add + kept_existing_pils
-                        )
-                    else:
-                        final_imgs = (
-                            kept_existing_pils + new_to_add
-                        )
-
-                    new_main, new_sub = pack_images_for_row(
-                        final_imgs
-                    )
-
-                    id_col = worksheet.col_values(1)
-                    if sel_id in id_col:
-                        row_num = id_col.index(sel_id) + 1
-                        reg_date = str(
-                            sel_row.get(
-                                "登録日",
-                                str(datetime.date.today())
-                            )
-                        )
-                        updated_row = [
-                            sel_id, e_brand, e_name, e_cat,
-                            e_color, e_size, e_len, e_wid,
-                            e_shd, e_slv, e_wst, e_ins,
-                            e_hip, e_thg, new_main,
-                            new_sub, reg_date, e_memo
-                        ]
-                        worksheet.update(
-                            range_name=f"A{row_num}:R{row_num}",
-                            values=[updated_row]
-                        )
-                        st.session_state.edit_staged_images = []
-                        st.session_state.processed_hashes_t4 = set()
-                        st.session_state.up_key_t4 += 1
-                        st.success("更新しました！")
-                        time.sleep(0.6)
-                        st.rerun()
-
-        with st.expander("🗑️ アイテム削除"):
-            if st.button(
-                "このアイテムを削除する",
-                type="secondary",
-                key=f"t4_del_{sel_id}"
-            ):
-                id_col = worksheet.col_values(1)
-                if sel_id in id_col:
-                    row_num = id_col.index(sel_id) + 1
-                    worksheet.delete_rows(row_num)
-                    st.rerun()
