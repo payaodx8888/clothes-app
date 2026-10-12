@@ -209,22 +209,24 @@ CUSTOM_CSS = """
     border-radius: 3px;
     white-space: pre-wrap;
 }
-.closet-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+/* クローゼット用：スマホでも2列タイルを維持 */
+div[data-testid="stHorizontalBlock"]:has(.closet-card) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    margin-bottom: 6px !important;
 }
-@media (min-width: 768px) {
-    .closet-grid {
-        grid-template-columns: repeat(4, 1fr);
-        gap: 14px;
-    }
+div[data-testid="stHorizontalBlock"]:has(.closet-card) > div {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: unset !important;
 }
 .closet-card {
-    border: 1px solid rgba(128,128,128,0.2);
-    border-radius: 10px;
+    border: 1px solid rgba(128,128,128,0.22);
+    border-radius: 10px 10px 4px 4px;
     overflow: hidden;
     background: rgba(128,128,128,0.02);
+    margin-bottom: 2px;
 }
 .closet-img-wrap {
     position: relative;
@@ -537,7 +539,7 @@ if not df.empty:
     df["色グループ"] = df["色"].apply(normalize_color_group)
 
 # ==========================================
-# どこからでも開ける編集ポップアップ（モーダル）
+# 編集ポップアップ（モーダル）
 # ==========================================
 @st.dialog("✏️ アイテム編集・画像追加", width="large")
 def open_edit_dialog(item_id: str):
@@ -800,7 +802,9 @@ def open_edit_dialog(item_id: str):
 # ==========================================
 # 共通フィルター＆集計バー関数
 # ==========================================
-def filter_and_sort_df(base_df: pd.DataFrame, prefix: str):
+def filter_and_sort_df(
+    base_df: pd.DataFrame, prefix: str, show_view_toggle: bool = True
+):
     r1_c1, r1_c2 = st.columns([1.8, 1.2])
     with r1_c1:
         sel_cat = st.selectbox(
@@ -817,7 +821,12 @@ def filter_and_sort_df(base_df: pd.DataFrame, prefix: str):
             key=f"{prefix}_usage"
         )
 
-    r2_c1, r2_c2, r2_c3 = st.columns([1.2, 1.3, 1])
+    if show_view_toggle:
+        r2_c1, r2_c2, r2_c3 = st.columns([1.2, 1.3, 1])
+    else:
+        r2_c1, r2_c2 = st.columns([1.2, 1.5])
+        r2_c3 = None
+
     with r2_c1:
         sel_col = st.selectbox(
             "色グループ",
@@ -838,13 +847,16 @@ def filter_and_sort_df(base_df: pd.DataFrame, prefix: str):
             label_visibility="collapsed",
             key=f"{prefix}_sort"
         )
-    with r2_c3:
-        view_mode = st.selectbox(
-            "表示",
-            ["📱 カード", "📊 表"],
-            label_visibility="collapsed",
-            key=f"{prefix}_view"
-        )
+    if show_view_toggle and r2_c3 is not None:
+        with r2_c3:
+            view_mode = st.selectbox(
+                "表示",
+                ["📱 カード", "📊 表"],
+                label_visibility="collapsed",
+                key=f"{prefix}_view"
+            )
+    else:
+        view_mode = "📱 カード"
 
     out = base_df.copy()
     if sel_cat != "カテゴリ: ALL":
@@ -883,7 +895,6 @@ def filter_and_sort_df(base_df: pd.DataFrame, prefix: str):
     else:
         out = out.iloc[::-1]
 
-    # 所持数＆色別内訳カウンター表示
     total_cnt = len(out)
     col_counts = out["色グループ"].value_counts()
     chips = []
@@ -913,7 +924,7 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
     if not df.empty:
         df_f, sel_cat_val, view_mode = filter_and_sort_df(
-            df, "t1"
+            df, "t1", show_view_toggle=True
         )
 
         if "📱" in view_mode:
@@ -1138,179 +1149,173 @@ with tab1:
         st.info("データがありません。")
 
 # ==========================================
-# タブ2：クローゼット
+# タブ2：クローゼット（各服の下に直接「写真・メモ」と「編集」を配置）
 # ==========================================
 with tab2:
     if not df.empty:
-        tc1, tc2, tc3 = st.columns(3)
-        with tc1:
-            c_cat = st.selectbox(
-                "カテゴリ",
-                ["カテゴリ: ALL"] + CATEGORIES,
-                label_visibility="collapsed",
-                key="t2_cat"
-            )
-        with tc2:
-            c_use = st.selectbox(
-                "用途",
-                ["用途: ALL"] + USAGE_TAGS,
-                label_visibility="collapsed",
-                key="t2_use"
-            )
-        with tc3:
-            c_col = st.selectbox(
-                "色",
-                ["色: ALL"] + COLOR_GROUPS,
-                label_visibility="collapsed",
-                key="t2_col"
-            )
-
-        df_c = df.copy()
-        if c_cat != "カテゴリ: ALL":
-            df_c = df_c[df_c["カテゴリ"] == c_cat]
-        if c_use != "用途: ALL":
-            df_c = df_c[
-                df_c["用途"].astype(str).apply(
-                    lambda x: c_use in [
-                        t.strip() for t in x.split(",")
-                    ]
-                )
-            ]
-        if c_col != "色: ALL":
-            df_c = df_c[df_c["色グループ"] == c_col]
-
-        grid_items = ['<div class="closet-grid">']
-        for _, r in df_c.iterrows():
-            m_raw = str(r.get("メイン画像URL", "")).strip()
-            s_raw = str(r.get("サブ画像URL", "")).strip()
-            s_cnt = len([
-                x for x in s_raw.split(",") if x.strip()
-            ])
-            src = get_img_src(m_raw)
-            img_el = (
-                f'<img src="{src}" class="closet-img">'
-                if src
-                else '<div class="closet-img"></div>'
-            )
-            sub_badge = (
-                f'<span class="closet-sub-cnt">+{s_cnt}</span>'
-                if s_cnt > 0
-                else ""
-            )
-            sz = html.escape(
-                str(r.get("表記サイズ") or "-")
-            )
-            br = html.escape(str(r.get("ブランド") or ""))
-            nm = html.escape(str(r.get("アイテム名") or ""))
-            cl = html.escape(str(r.get("色") or ""))
-            b_line = f"{br} / {cl}" if cl else br
-
-            m_parts = []
-            for k, lbl in [
-                ("着丈", "丈"), ("身幅", "幅"),
-                ("ウエスト", "W"), ("股下", "股")
-            ]:
-                v = fmt_num(r.get(k, 0))
-                if v:
-                    m_parts.append(f"{lbl}{v}")
-            m_line = " ".join(m_parts)
-
-            memo_tx = str(r.get("メモ") or "").strip()
-            memo_div = (
-                f'<div class="closet-memo">'
-                f'📝 {html.escape(memo_tx)}</div>'
-                if memo_tx
-                else ""
-            )
-
-            item_html = (
-                f'<div class="closet-card">'
-                f'<div class="closet-img-wrap">{img_el}'
-                f'<span class="closet-badge">{sz}</span>'
-                f'{sub_badge}</div>'
-                f'<div class="closet-info">'
-                f'<div class="closet-b">{b_line}</div>'
-                f'<div class="closet-n">{nm}</div>'
-                f'<div class="closet-m">{m_line}</div>'
-                f'{memo_div}'
-                f'</div></div>'
-            )
-            grid_items.append(item_html)
-        grid_items.append("</div>")
-        st.markdown(
-            "".join(grid_items),
-            unsafe_allow_html=True
+        df_c, _, _ = filter_and_sort_df(
+            df, "t2", show_view_toggle=False
         )
+        rows_c = list(df_c.iterrows())
 
-        st.write("")
-        with st.expander(
-            "🔍 アイテムの詳細・サブ画像・編集を開く",
-            expanded=True
-        ):
-            opts = [
-                f"{r.get('アイテムID')} | "
-                f"{r.get('ブランド')} - {r.get('アイテム名')} "
-                f"({r.get('表記サイズ')})"
-                for _, r in df_c.iterrows()
-            ]
-            if opts:
-                dc1, dc2 = st.columns([3, 1])
-                s_item = dc1.selectbox(
-                    "アイテムを選択",
-                    opts,
-                    label_visibility="collapsed",
-                    key="t2_detail_sel"
-                )
-                s_id = s_item.split(" | ")[0]
-                if dc2.button(
-                    "✏️ 編集する",
-                    type="primary",
-                    use_container_width=True,
-                    key=f"t2_ed_btn_{s_id}"
-                ):
-                    open_edit_dialog(s_id)
-
-                s_row = df[
-                    df["アイテムID"].astype(str) == s_id
-                ].iloc[0]
-
-                d_pills = []
-                for col_k, short_k in ALL_M_KEYS:
-                    val_s = fmt_num(s_row.get(col_k, 0))
-                    if val_s:
-                        d_pills.append(
-                            f'<span class="m-pill">'
-                            f'{short_k} <b>{val_s}cm</b></span>'
+        for i in range(0, len(rows_c), 2):
+            cols = st.columns(2)
+            for j in range(2):
+                if i + j < len(rows_c):
+                    idx, r = rows_c[i + j]
+                    with cols[j]:
+                        iid = str(
+                            r.get("アイテムID", f"c_{idx}")
                         )
-                if d_pills:
-                    st.markdown(
-                        f'<div class="metrics-wrap" '
-                        f'style="margin-bottom:8px;">'
-                        f'{"".join(d_pills)}</div>',
-                        unsafe_allow_html=True
-                    )
+                        m_raw = str(
+                            r.get("メイン画像URL", "")
+                        ).strip()
+                        s_raw = str(
+                            r.get("サブ画像URL", "")
+                        ).strip()
+                        sub_list = [
+                            x.strip()
+                            for x in s_raw.split(",")
+                            if x.strip()
+                        ]
+                        s_cnt = len(sub_list)
+                        total_imgs = (
+                            (1 if m_raw else 0) + s_cnt
+                        )
 
-                m_u = str(
-                    s_row.get("メイン画像URL", "")
-                ).strip()
-                s_u_list = [
-                    x.strip()
-                    for x in str(
-                        s_row.get("サブ画像URL", "")
-                    ).split(",")
-                    if x.strip()
-                ]
-                all_u = []
-                if m_u:
-                    all_u.append(("メイン", m_u))
-                for idx_s, su in enumerate(s_u_list):
-                    all_u.append((f"サブ #{idx_s+1}", su))
+                        src = get_img_src(m_raw)
+                        img_el = (
+                            f'<img src="{src}" '
+                            f'class="closet-img">'
+                            if src
+                            else '<div class="closet-img"></div>'
+                        )
+                        sub_badge = (
+                            f'<span class="closet-sub-cnt">'
+                            f'+{s_cnt}</span>'
+                            if s_cnt > 0
+                            else ""
+                        )
+                        sz = html.escape(
+                            str(r.get("表記サイズ") or "-")
+                        )
+                        br = html.escape(
+                            str(r.get("ブランド") or "")
+                        )
+                        nm = html.escape(
+                            str(r.get("アイテム名") or "")
+                        )
+                        cl = html.escape(
+                            str(r.get("色") or "")
+                        )
+                        b_line = (
+                            f"{br} / {cl}" if cl else br
+                        )
 
-                if all_u:
-                    g_cols = st.columns(2)
-                    for i_u, (cap_u, u_val) in enumerate(all_u):
-                        with g_cols[i_u % 2]:
-                            show_saved_image(u_val, cap_u)
+                        m_parts = []
+                        for k, lbl in [
+                            ("着丈", "丈"),
+                            ("身幅", "幅"),
+                            ("ウエスト", "W"),
+                            ("股下", "股")
+                        ]:
+                            v = fmt_num(r.get(k, 0))
+                            if v:
+                                m_parts.append(f"{lbl}{v}")
+                        m_line = " ".join(m_parts)
+
+                        cur_memo = str(
+                            r.get("メモ") or ""
+                        ).strip()
+                        memo_div = (
+                            f'<div class="closet-memo">'
+                            f'📝 {html.escape(cur_memo)}</div>'
+                            if cur_memo
+                            else ""
+                        )
+
+                        item_html = (
+                            f'<div class="closet-card">'
+                            f'<div class="closet-img-wrap">'
+                            f'{img_el}'
+                            f'<span class="closet-badge">'
+                            f'{sz}</span>'
+                            f'{sub_badge}</div>'
+                            f'<div class="closet-info">'
+                            f'<div class="closet-b">'
+                            f'{b_line}</div>'
+                            f'<div class="closet-n">{nm}</div>'
+                            f'<div class="closet-m">'
+                            f'{m_line}</div>'
+                            f'{memo_div}'
+                            f'</div></div>'
+                        )
+                        st.markdown(
+                            item_html,
+                            unsafe_allow_html=True
+                        )
+
+                        with st.expander(
+                            f"📸 写真({total_imgs})・メモ"
+                        ):
+                            d_pills = []
+                            for col_k, short_k in ALL_M_KEYS:
+                                val_s = fmt_num(
+                                    r.get(col_k, 0)
+                                )
+                                if val_s:
+                                    d_pills.append(
+                                        f'<span class="m-pill">'
+                                        f'{short_k} '
+                                        f'<b>{val_s}</b></span>'
+                                    )
+                            if d_pills:
+                                st.markdown(
+                                    f'<div class="metrics-wrap"'
+                                    f' style="margin-bottom:6px;">'
+                                    f'{"".join(d_pills)}</div>',
+                                    unsafe_allow_html=True
+                                )
+
+                            for s_i, s_u in enumerate(sub_list):
+                                show_saved_image(
+                                    s_u, f"サブ #{s_i+1}"
+                                )
+                            if not sub_list and m_raw:
+                                show_saved_image(
+                                    m_raw, "メイン"
+                                )
+
+                            c_memo_val = st.text_area(
+                                "📝 メモ",
+                                value=cur_memo,
+                                height=60,
+                                label_visibility="collapsed",
+                                placeholder="メモを入力...",
+                                key=f"t2_m_in_{iid}_{idx}"
+                            )
+                            if st.button(
+                                "💾 メモ保存",
+                                key=f"t2_m_btn_{iid}_{idx}",
+                                type="primary",
+                                use_container_width=True
+                            ):
+                                if save_memo_quickly(
+                                    iid, c_memo_val
+                                ):
+                                    st.toast(
+                                        "保存しました",
+                                        icon="📝"
+                                    )
+                                    time.sleep(0.4)
+                                    st.rerun()
+
+                        if st.button(
+                            "✏️ 編集",
+                            key=f"t2_ed_{iid}_{idx}",
+                            use_container_width=True
+                        ):
+                            open_edit_dialog(iid)
     else:
         st.info("データがありません。")
 
