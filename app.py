@@ -59,7 +59,7 @@ EXPECTED_HEADERS = [
     "アイテムID", "ブランド", "アイテム名", "カテゴリ",
     "色", "表記サイズ", "着丈", "身幅", "肩幅", "袖丈",
     "ウエスト", "股下", "ヒップ", "わたり幅",
-    "メイン画像URL", "サブ画像URL", "登録日"
+    "メイン画像URL", "サブ画像URL", "登録日", "メモ"
 ]
 
 st.set_page_config(
@@ -71,7 +71,7 @@ st.set_page_config(
 CUSTOM_CSS = """
 <style>
 .block-container {
-    padding-top: 1.2rem !important;
+    padding-top: 1.1rem !important;
     padding-bottom: 2rem !important;
     max-width: 960px !important;
 }
@@ -98,15 +98,15 @@ CUSTOM_CSS = """
     display: flex;
     gap: 12px;
     padding: 10px;
-    border: 1px solid rgba(128,128,128,0.22);
-    border-radius: 10px;
-    margin-bottom: 8px;
+    border: 1px solid rgba(128,128,128,0.24);
+    border-radius: 10px 10px 4px 4px;
+    margin-bottom: 2px;
     background: rgba(128,128,128,0.03);
     align-items: center;
 }
 .spec-thumb {
-    width: 62px;
-    height: 62px;
+    width: 66px;
+    height: 66px;
     border-radius: 8px;
     object-fit: cover;
     flex-shrink: 0;
@@ -121,7 +121,7 @@ CUSTOM_CSS = """
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
 }
 .sz-badge {
     background: #111;
@@ -165,6 +165,17 @@ CUSTOM_CSS = """
 .m-pill b {
     font-weight: 700;
 }
+.memo-preview {
+    margin-top: 5px;
+    font-size: 0.73rem;
+    color: inherit;
+    opacity: 0.82;
+    background: rgba(255, 193, 7, 0.12);
+    border-left: 3px solid #f59e0b;
+    padding: 3px 7px;
+    border-radius: 3px;
+    white-space: pre-wrap;
+}
 .closet-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -205,6 +216,16 @@ CUSTOM_CSS = """
     padding: 2px 7px;
     border-radius: 4px;
 }
+.closet-sub-cnt {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    background: rgba(0,0,0,0.65);
+    color: #fff;
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+}
 .closet-info {
     padding: 8px;
 }
@@ -228,6 +249,16 @@ CUSTOM_CSS = """
     font-size: 0.68rem;
     opacity: 0.75;
     line-height: 1.35;
+}
+.closet-memo {
+    font-size: 0.68rem;
+    opacity: 0.85;
+    margin-top: 3px;
+    padding-top: 3px;
+    border-top: 1px dashed rgba(128,128,128,0.25);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 </style>
 <div class="app-header">
@@ -307,16 +338,24 @@ def get_img_src(val: str) -> str:
         return s
     return ""
 
-def show_saved_image(val: str):
+def show_saved_image(val: str, caption: str = ""):
     s = str(val).strip()
     if not s:
         return
     try:
         if s.startswith("B64:"):
             raw = base64.b64decode(s[4:])
-            st.image(raw, use_container_width=True)
+            st.image(
+                raw,
+                caption=caption if caption else None,
+                use_container_width=True
+            )
         elif s.startswith("http"):
-            st.image(s, use_container_width=True)
+            st.image(
+                s,
+                caption=caption if caption else None,
+                use_container_width=True
+            )
     except Exception:
         pass
 
@@ -381,10 +420,21 @@ try:
     worksheet = sh.sheet1
     current_headers = worksheet.row_values(1)
     if current_headers != EXPECTED_HEADERS:
-        worksheet.update([EXPECTED_HEADERS])
+        worksheet.update(
+            range_name="A1:R1",
+            values=[EXPECTED_HEADERS]
+        )
 except Exception as e:
     st.error(f"Google連携エラー: {e}")
     st.stop()
+
+def save_memo_quickly(item_id: str, new_memo: str):
+    id_col = worksheet.col_values(1)
+    if item_id in id_col:
+        row_num = id_col.index(item_id) + 1
+        worksheet.update_cell(row_num, 18, new_memo)
+        return True
+    return False
 
 if "staged_images" not in st.session_state:
     st.session_state.staged_images = []
@@ -404,7 +454,8 @@ default_form_values = {
     "f_waist": 0.0,
     "f_inseam": 0.0,
     "f_hip": 0.0,
-    "f_thigh": 0.0
+    "f_thigh": 0.0,
+    "f_memo": ""
 }
 for k, v in default_form_values.items():
     if k not in st.session_state:
@@ -421,7 +472,7 @@ records = worksheet.get_all_records()
 df = pd.DataFrame(records)
 
 # ==========================================
-# タブ1：サイズ比較
+# タブ1：サイズ比較（写真展開＆メモ直接編集つき）
 # ==========================================
 with tab1:
     if not df.empty:
@@ -448,7 +499,6 @@ with tab1:
             df_f = df
 
         if "📱" in view_mode:
-            cards_html = []
             m_keys = [
                 ("ウエスト", "W"),
                 ("股下", "股下"),
@@ -459,8 +509,17 @@ with tab1:
                 ("肩幅", "肩幅"),
                 ("袖丈", "袖丈")
             ]
-            for _, r in df_f.iterrows():
-                src = get_img_src(r.get("メイン画像URL", ""))
+            for idx, r in df_f.iterrows():
+                iid = str(r.get("アイテムID", f"row_{idx}"))
+                m_raw = str(r.get("メイン画像URL", "")).strip()
+                s_raw = str(r.get("サブ画像URL", "")).strip()
+                sub_list = [
+                    x.strip() for x in s_raw.split(",")
+                    if x.strip()
+                ]
+                total_imgs = (1 if m_raw else 0) + len(sub_list)
+
+                src = get_img_src(m_raw)
                 if src:
                     img_tag = (
                         f'<img src="{src}" class="spec-thumb">'
@@ -479,6 +538,7 @@ with tab1:
                 )
                 cl = html.escape(str(r.get("色") or ""))
                 cl_str = f"({cl})" if cl else ""
+                cur_memo = str(r.get("メモ") or "").strip()
 
                 pills = []
                 for col_k, short_k in m_keys:
@@ -490,7 +550,15 @@ with tab1:
                         )
                 pills_html = "".join(pills)
 
-                card = (
+                memo_html = ""
+                if cur_memo:
+                    esc_m = html.escape(cur_memo)
+                    memo_html = (
+                        f'<div class="memo-preview">'
+                        f'📝 {esc_m}</div>'
+                    )
+
+                card_html = (
                     f'<div class="spec-card">{img_tag}'
                     f'<div class="spec-body">'
                     f'<div class="spec-top">'
@@ -501,30 +569,70 @@ with tab1:
                     f'<div class="item-txt">{nm}</div>'
                     f'<div class="metrics-wrap">'
                     f'{pills_html}</div>'
+                    f'{memo_html}'
                     f'</div></div>'
                 )
-                cards_html.append(card)
-            st.markdown(
-                "".join(cards_html),
-                unsafe_allow_html=True
-            )
+                st.markdown(card_html, unsafe_allow_html=True)
+
+                exp_label = (
+                    f"📸 写真({total_imgs}枚)・メモを開く / 編集"
+                )
+                with st.expander(exp_label):
+                    all_img_strs = []
+                    if m_raw:
+                        all_img_strs.append(("メイン画像", m_raw))
+                    for s_i, s_u in enumerate(sub_list):
+                        all_img_strs.append(
+                            (f"サブ画像 #{s_i+1}", s_u)
+                        )
+
+                    if all_img_strs:
+                        img_cols = st.columns(2)
+                        for p_i, (cap_t, u_str) in enumerate(
+                            all_img_strs
+                        ):
+                            with img_cols[p_i % 2]:
+                                show_saved_image(u_str, cap_t)
+                    else:
+                        st.caption("画像は登録されていません。")
+
+                    new_memo_val = st.text_area(
+                        "📝 メモ（サイズ感・着心地・コーデなど）",
+                        value=cur_memo,
+                        height=68,
+                        placeholder="例: ウエスト少し余裕あり、丈感ジャスト",
+                        key=f"t1_memo_in_{iid}_{idx}"
+                    )
+                    if st.button(
+                        "💾 メモを保存",
+                        key=f"t1_memo_btn_{iid}_{idx}",
+                        type="primary"
+                    ):
+                        with st.spinner("メモを保存中..."):
+                            if save_memo_quickly(iid, new_memo_val):
+                                st.toast("メモを保存しました！", icon="📝")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error("保存に失敗しました。")
         else:
             if sel_cat == "ボトムス":
                 t_cols = [
                     "表記サイズ", "アイテム名", "ブランド",
                     "色", "ウエスト", "股下", "わたり幅",
-                    "ヒップ", "着丈"
+                    "ヒップ", "着丈", "メモ"
                 ]
             elif sel_cat in ["トップス", "アウター"]:
                 t_cols = [
                     "表記サイズ", "アイテム名", "ブランド",
-                    "色", "着丈", "身幅", "肩幅", "袖丈"
+                    "色", "着丈", "身幅", "肩幅", "袖丈", "メモ"
                 ]
             else:
                 t_cols = [
                     "表記サイズ", "アイテム名", "ブランド",
                     "色", "着丈", "身幅", "肩幅", "袖丈",
-                    "ウエスト", "股下", "わたり幅", "ヒップ"
+                    "ウエスト", "股下", "わたり幅",
+                    "ヒップ", "メモ"
                 ]
             disp_cols = [
                 c for c in t_cols if c in df_f.columns
@@ -563,11 +671,21 @@ with tab2:
 
         grid_items = ['<div class="closet-grid">']
         for _, r in df_c.iterrows():
-            src = get_img_src(r.get("メイン画像URL", ""))
+            m_raw = str(r.get("メイン画像URL", "")).strip()
+            s_raw = str(r.get("サブ画像URL", "")).strip()
+            s_cnt = len([
+                x for x in s_raw.split(",") if x.strip()
+            ])
+            src = get_img_src(m_raw)
             img_el = (
                 f'<img src="{src}" class="closet-img">'
                 if src
                 else '<div class="closet-img"></div>'
+            )
+            sub_badge = (
+                f'<span class="closet-sub-cnt">+{s_cnt}枚</span>'
+                if s_cnt > 0
+                else ""
             )
             sz = html.escape(
                 str(r.get("表記サイズ") or "-")
@@ -587,15 +705,24 @@ with tab2:
                     m_parts.append(f"{lbl}{v}")
             m_line = " ".join(m_parts)
 
+            memo_tx = str(r.get("メモ") or "").strip()
+            memo_div = (
+                f'<div class="closet-memo">'
+                f'📝 {html.escape(memo_tx)}</div>'
+                if memo_tx
+                else ""
+            )
+
             item_html = (
                 f'<div class="closet-card">'
                 f'<div class="closet-img-wrap">{img_el}'
                 f'<span class="closet-badge">{sz}</span>'
-                f'</div>'
+                f'{sub_badge}</div>'
                 f'<div class="closet-info">'
                 f'<div class="closet-b">{b_line}</div>'
                 f'<div class="closet-n">{nm}</div>'
                 f'<div class="closet-m">{m_line}</div>'
+                f'{memo_div}'
                 f'</div></div>'
             )
             grid_items.append(item_html)
@@ -606,7 +733,7 @@ with tab2:
         )
 
         st.write("")
-        with st.expander("🔍 サブ画像・詳細を拡大して見る"):
+        with st.expander("🔍 サブ画像・メモを拡大して見る / 書く"):
             opts = [
                 f"{r.get('アイテムID')} | "
                 f"{r.get('ブランド')} - {r.get('アイテム名')}"
@@ -622,15 +749,37 @@ with tab2:
                 s_row = df[
                     df["アイテムID"].astype(str) == s_id
                 ].iloc[0]
+
+                c_memo = str(s_row.get("メモ") or "").strip()
+                t2_memo = st.text_area(
+                    "📝 メモ",
+                    value=c_memo,
+                    height=68,
+                    key=f"t2_memo_in_{s_id}"
+                )
+                if st.button(
+                    "💾 メモを更新",
+                    key=f"t2_memo_btn_{s_id}",
+                    type="primary"
+                ):
+                    if save_memo_quickly(s_id, t2_memo):
+                        st.toast("メモを更新しました！", icon="📝")
+                        time.sleep(0.5)
+                        st.rerun()
+
                 show_saved_image(
-                    s_row.get("メイン画像URL", "")
+                    s_row.get("メイン画像URL", ""),
+                    "メイン画像"
                 )
                 s_urls = str(
                     s_row.get("サブ画像URL", "")
                 ).split(",")
-                for su in s_urls:
+                for idx_s, su in enumerate(s_urls):
                     if su.strip():
-                        show_saved_image(su.strip())
+                        show_saved_image(
+                            su.strip(),
+                            f"サブ画像 #{idx_s+1}"
+                        )
     else:
         st.info("まだデータがありません。")
 
@@ -982,6 +1131,13 @@ with tab3:
             "わたり幅", step=0.5, key="f_thigh"
         )
 
+        memo = st.text_area(
+            "📝 メモ（サイズ感・着心地・購入先など自由記入）",
+            placeholder="例: ウエスト少しゆとりあり、生地厚めで冬向き",
+            height=68,
+            key="f_memo"
+        )
+
         with st.expander("📁 直接ファイルを選択して追加"):
             uploaded_files = st.file_uploader(
                 "画像ファイルを選択",
@@ -1016,7 +1172,8 @@ with tab3:
                     sleeve, waist, inseam, hip, thigh,
                     main_img_data,
                     sub_img_str,
-                    str(datetime.date.today())
+                    str(datetime.date.today()),
+                    memo
                 ]
                 worksheet.append_row(new_row)
                 st.success(
@@ -1263,6 +1420,13 @@ with tab4:
                 key=f"t4_th_{sel_id}"
             )
 
+            e_memo = st.text_area(
+                "📝 メモ",
+                value=str(sel_row.get("メモ") or ""),
+                height=68,
+                key=f"t4_mm_{sel_id}"
+            )
+
             edit_files = st.file_uploader(
                 "📱 iPhone・ファイルから画像を追加（任意）",
                 type=["jpg", "jpeg", "png", "webp"],
@@ -1312,10 +1476,10 @@ with tab4:
                             e_color, e_size, e_len, e_wid,
                             e_shd, e_slv, e_wst, e_ins,
                             e_hip, e_thg, new_main,
-                            new_sub, reg_date
+                            new_sub, reg_date, e_memo
                         ]
                         worksheet.update(
-                            range_name=f"A{row_num}:Q{row_num}",
+                            range_name=f"A{row_num}:R{row_num}",
                             values=[updated_row]
                         )
                         st.session_state.edit_staged_images = []
