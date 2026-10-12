@@ -6,21 +6,12 @@ from google import genai
 from PIL import Image
 from pydantic import BaseModel
 import io
-import os
 import datetime
 import uuid
-import glob
 import time
 import base64
-import json
 import html
 import hashlib
-
-try:
-    from PIL import ImageGrab
-    HAS_IMAGEGRAB = True
-except Exception:
-    HAS_IMAGEGRAB = False
 
 try:
     from streamlit_paste_button import paste_image_button
@@ -28,26 +19,8 @@ try:
 except Exception:
     HAS_PASTE_BTN = False
 
-REQ_FILE = "requirements.txt"
-REQ_TEXT = "\n".join([
-    "streamlit",
-    "pandas",
-    "gspread",
-    "google-auth",
-    "google-genai",
-    "Pillow",
-    "pydantic",
-    "streamlit-paste-button"
-])
-if not os.path.exists(REQ_FILE):
-    try:
-        with open(REQ_FILE, "w", encoding="utf-8") as rf:
-            rf.write(REQ_TEXT)
-    except Exception:
-        pass
-
 # ==========================================
-# 設定エリア
+# 設定エリア（Webクラウド専用）
 # ==========================================
 _K1 = "AQ.Ab8RN6IHJDmDYNheq3LAZyIO"
 _K2 = "qxY6KwNa5ouLQGFCnb7uLjxAlQ"
@@ -59,9 +32,6 @@ except Exception:
     pass
 
 SPREADSHEET_NAME = "洋服管理_DB"
-LOCAL_INPUT_DIR = "input_images"
-os.makedirs(LOCAL_INPUT_DIR, exist_ok=True)
-json_files = glob.glob("*.json")
 
 EXPECTED_HEADERS = [
     "アイテムID", "ブランド", "アイテム名", "カテゴリ",
@@ -79,9 +49,9 @@ st.set_page_config(
 CUSTOM_CSS = """
 <style>
 .block-container {
-    padding-top: 1.1rem !important;
+    padding-top: 1.0rem !important;
     padding-bottom: 2rem !important;
-    max-width: 960px !important;
+    max-width: 920px !important;
 }
 .app-header {
     display: flex;
@@ -92,13 +62,13 @@ CUSTOM_CSS = """
     margin-bottom: 8px;
 }
 .app-title {
-    font-size: 1.25rem;
+    font-size: 1.2rem;
     font-weight: 800;
     letter-spacing: 0.14em;
     margin: 0;
 }
 .app-sub {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     opacity: 0.55;
     letter-spacing: 0.08em;
 }
@@ -400,27 +370,12 @@ def init_google_sheet():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    if json_files:
-        creds = (
-            service_account.Credentials
-            .from_service_account_file(
-                json_files[0], scopes=scopes
-            )
-        )
-        return gspread.authorize(creds)
-    try:
-        if "gcp_service_account" in st.secrets:
-            c_info = dict(st.secrets["gcp_service_account"])
-            creds = (
-                service_account.Credentials
-                .from_service_account_info(
-                    c_info, scopes=scopes
-                )
-            )
-            return gspread.authorize(creds)
-    except Exception:
-        pass
-    raise Exception("認証情報が見つかりません。")
+    c_info = dict(st.secrets["gcp_service_account"])
+    creds = (
+        service_account.Credentials
+        .from_service_account_info(c_info, scopes=scopes)
+    )
+    return gspread.authorize(creds)
 
 try:
     gc = init_google_sheet()
@@ -448,10 +403,14 @@ if "staged_images" not in st.session_state:
     st.session_state.staged_images = []
 if "edit_staged_images" not in st.session_state:
     st.session_state.edit_staged_images = []
-if "last_paste_hash_t3" not in st.session_state:
-    st.session_state.last_paste_hash_t3 = ""
-if "last_paste_hash_t4" not in st.session_state:
-    st.session_state.last_paste_hash_t4 = ""
+if "processed_hashes_t3" not in st.session_state:
+    st.session_state.processed_hashes_t3 = set()
+if "processed_hashes_t4" not in st.session_state:
+    st.session_state.processed_hashes_t4 = set()
+if "up_key_t3" not in st.session_state:
+    st.session_state.up_key_t3 = 0
+if "up_key_t4" not in st.session_state:
+    st.session_state.up_key_t4 = 0
 
 default_form_values = {
     "f_brand": "",
@@ -500,15 +459,16 @@ with tab1:
         with fc2:
             view_mode = st.selectbox(
                 "表示切替",
-                ["📱 スマホ最適化カード", "📊 コンパクト表"],
+                ["📱 カード", "📊 表"],
                 label_visibility="collapsed",
                 key="t1_view_mode"
             )
 
-        if sel_cat != "ALL":
-            df_f = df[df["カテゴリ"] == sel_cat]
-        else:
-            df_f = df
+        df_f = (
+            df[df["カテゴリ"] == sel_cat]
+            if sel_cat != "ALL"
+            else df
+        )
 
         if "📱" in view_mode:
             m_keys = [
@@ -532,12 +492,11 @@ with tab1:
                 total_imgs = (1 if m_raw else 0) + len(sub_list)
 
                 src = get_img_src(m_raw)
-                if src:
-                    img_tag = (
-                        f'<img src="{src}" class="spec-thumb">'
-                    )
-                else:
-                    img_tag = '<div class="spec-thumb"></div>'
+                img_tag = (
+                    f'<img src="{src}" class="spec-thumb">'
+                    if src
+                    else '<div class="spec-thumb"></div>'
+                )
 
                 sz = html.escape(
                     str(r.get("表記サイズ") or "-")
@@ -562,13 +521,12 @@ with tab1:
                         )
                 pills_html = "".join(pills)
 
-                memo_html = ""
-                if cur_memo:
-                    esc_m = html.escape(cur_memo)
-                    memo_html = (
-                        f'<div class="memo-preview">'
-                        f'📝 {esc_m}</div>'
-                    )
+                memo_html = (
+                    f'<div class="memo-preview">'
+                    f'📝 {html.escape(cur_memo)}</div>'
+                    if cur_memo
+                    else ""
+                )
 
                 card_html = (
                     f'<div class="spec-card">{img_tag}'
@@ -586,16 +544,15 @@ with tab1:
                 )
                 st.markdown(card_html, unsafe_allow_html=True)
 
-                exp_label = (
-                    f"📸 写真({total_imgs}枚)・メモを開く / 編集"
-                )
-                with st.expander(exp_label):
+                with st.expander(
+                    f"📸 写真({total_imgs})・メモ"
+                ):
                     all_img_strs = []
                     if m_raw:
-                        all_img_strs.append(("メイン画像", m_raw))
+                        all_img_strs.append(("メイン", m_raw))
                     for s_i, s_u in enumerate(sub_list):
                         all_img_strs.append(
-                            (f"サブ画像 #{s_i+1}", s_u)
+                            (f"サブ #{s_i+1}", s_u)
                         )
 
                     if all_img_strs:
@@ -605,28 +562,24 @@ with tab1:
                         ):
                             with img_cols[p_i % 2]:
                                 show_saved_image(u_str, cap_t)
-                    else:
-                        st.caption("画像は登録されていません。")
 
                     new_memo_val = st.text_area(
-                        "📝 メモ（サイズ感・着心地・コーデなど）",
+                        "📝 メモ",
                         value=cur_memo,
                         height=68,
-                        placeholder="例: ウエスト少しゆとりあり、丈感ジャスト",
+                        label_visibility="collapsed",
+                        placeholder="メモを入力...",
                         key=f"t1_memo_in_{iid}_{idx}"
                     )
                     if st.button(
-                        "💾 メモを保存",
+                        "💾 メモ保存",
                         key=f"t1_memo_btn_{iid}_{idx}",
                         type="primary"
                     ):
-                        with st.spinner("メモを保存中..."):
-                            if save_memo_quickly(iid, new_memo_val):
-                                st.toast("メモを保存しました！", icon="📝")
-                                time.sleep(0.5)
-                                st.rerun()
-                            else:
-                                st.error("保存に失敗しました。")
+                        if save_memo_quickly(iid, new_memo_val):
+                            st.toast("保存しました", icon="📝")
+                            time.sleep(0.4)
+                            st.rerun()
         else:
             if sel_cat == "ボトムス":
                 t_cols = [
@@ -661,7 +614,7 @@ with tab1:
                 hide_index=True
             )
     else:
-        st.info("まだ登録データがありません。")
+        st.info("データがありません。")
 
 # ==========================================
 # タブ2：クローゼット
@@ -669,7 +622,7 @@ with tab1:
 with tab2:
     if not df.empty:
         c_cat = st.radio(
-            "ギャラリー絞り込み",
+            "絞り込み",
             ["ALL", "トップス", "アウター", "ボトムス", "その他"],
             horizontal=True,
             label_visibility="collapsed",
@@ -695,7 +648,7 @@ with tab2:
                 else '<div class="closet-img"></div>'
             )
             sub_badge = (
-                f'<span class="closet-sub-cnt">+{s_cnt}枚</span>'
+                f'<span class="closet-sub-cnt">+{s_cnt}</span>'
                 if s_cnt > 0
                 else ""
             )
@@ -743,198 +696,90 @@ with tab2:
             "".join(grid_items),
             unsafe_allow_html=True
         )
-
-        st.write("")
-        with st.expander("🔍 サブ画像・メモを拡大して見る / 書く"):
-            opts = [
-                f"{r.get('アイテムID')} | "
-                f"{r.get('ブランド')} - {r.get('アイテム名')}"
-                for _, r in df_c.iterrows()
-            ]
-            if opts:
-                s_item = st.selectbox(
-                    "アイテムを選択",
-                    opts,
-                    key="t2_detail_sel"
-                )
-                s_id = s_item.split(" | ")[0]
-                s_row = df[
-                    df["アイテムID"].astype(str) == s_id
-                ].iloc[0]
-
-                c_memo = str(s_row.get("メモ") or "").strip()
-                t2_memo = st.text_area(
-                    "📝 メモ",
-                    value=c_memo,
-                    height=68,
-                    key=f"t2_memo_in_{s_id}"
-                )
-                if st.button(
-                    "💾 メモを更新",
-                    key=f"t2_memo_btn_{s_id}",
-                    type="primary"
-                ):
-                    if save_memo_quickly(s_id, t2_memo):
-                        st.toast("メモを更新しました！", icon="📝")
-                        time.sleep(0.5)
-                        st.rerun()
-
-                show_saved_image(
-                    s_row.get("メイン画像URL", ""),
-                    "メイン画像"
-                )
-                s_urls = str(
-                    s_row.get("サブ画像URL", "")
-                ).split(",")
-                for idx_s, su in enumerate(s_urls):
-                    if su.strip():
-                        show_saved_image(
-                            su.strip(),
-                            f"サブ画像 #{idx_s+1}"
-                        )
     else:
-        st.info("まだデータがありません。")
+        st.info("データがありません。")
 
 # ==========================================
-# タブ3：新規アイテム登録
+# タブ3：新規アイテム登録（超シンプル版）
 # ==========================================
 with tab3:
-    st.markdown("##### 1. スクショ貼り付け・画像選択 ＆ AI自動入力")
-    st.caption(
-        "💡 PCでスクショ（Win+Shift+S等）を撮った直後に、"
-        "下の『📋 スクショを直接貼り付け』ボタンを押すか、"
-        "ファイル選択枠で Ctrl+V を押すとそのまま取り込めます！"
-    )
-
-    p_col1, p_col2, p_col3 = st.columns([1.4, 1.2, 1])
-
-    with p_col1:
-        if HAS_PASTE_BTN:
-            p_res = paste_image_button(
-                label="📋 スクショを直接貼り付け (PC/Cloud対応)",
-                background_color="#2563eb",
-                hover_background_color="#1d4ed8",
-                key="t3_paste_component"
-            )
-            if p_res.image_data is not None:
-                b_io = io.BytesIO()
-                p_res.image_data.save(b_io, format="PNG")
-                img_hash = hashlib.md5(b_io.getvalue()).hexdigest()
-                if img_hash != st.session_state.last_paste_hash_t3:
-                    st.session_state.last_paste_hash_t3 = img_hash
-                    st.session_state.staged_images.append(
-                        p_res.image_data.convert("RGB")
-                    )
-                    st.toast("スクショを貼り付けました！", icon="📸")
-        elif HAS_IMAGEGRAB:
-            if st.button(
-                "📋 スクショを直接貼り付け",
-                use_container_width=True,
-                key="t3_local_paste"
-            ):
-                try:
-                    grabbed = ImageGrab.grabclipboard()
-                    if isinstance(grabbed, Image.Image):
-                        st.session_state.staged_images.append(
-                            grabbed.convert("RGB")
-                        )
-                        st.toast("スクショを貼り付けました！", icon="📸")
-                    else:
-                        st.warning("クリップボードに画像がありません。")
-                except Exception:
-                    st.warning("下のファイル選択枠で Ctrl+V を押してください。")
-
-    with p_col2:
-        if json_files:
-            if st.button(
-                "📂 input_images 一括読込",
-                use_container_width=True,
-                key="t3_folder_load"
-            ):
-                img_paths = []
-                for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
-                    img_paths.extend(
-                        glob.glob(os.path.join(LOCAL_INPUT_DIR, ext))
-                    )
-                if img_paths:
-                    for p in sorted(img_paths):
-                        try:
-                            im = Image.open(p).convert("RGB")
-                            st.session_state.staged_images.append(im)
-                        except Exception:
-                            pass
-                    st.toast(f"{len(img_paths)}枚読み込みました！")
-                else:
-                    st.warning("フォルダに画像がありません。")
-
-    with p_col3:
-        if st.button(
-            "🗑️ 読込画像をクリア",
-            use_container_width=True,
-            key="t3_btn_clear_staged"
-        ):
-            st.session_state.staged_images = []
-            st.session_state.last_paste_hash_t3 = ""
-            st.rerun()
-
     reg_files = st.file_uploader(
-        "📁 スマホの写真選択 / PCファイル選択（ここをクリックして Ctrl+V ペーストも可）",
+        "📸 画像を選択 (PCは枠内で Ctrl+V も可)",
         type=["jpg", "jpeg", "png", "webp"],
         accept_multiple_files=True,
-        key="t3_file_uploader"
+        key=f"t3_up_{st.session_state.up_key_t3}"
     )
     if reg_files:
-        if st.button(
-            "⬆️ 選択した画像をAI読込リストに追加",
-            key="t3_btn_add_files"
-        ):
-            for rf in reg_files:
+        for rf in reg_files:
+            raw_b = rf.getvalue()
+            h_val = hashlib.md5(raw_b).hexdigest()
+            if h_val not in st.session_state.processed_hashes_t3:
+                st.session_state.processed_hashes_t3.add(h_val)
                 st.session_state.staged_images.append(
-                    Image.open(rf).convert("RGB")
+                    Image.open(io.BytesIO(raw_b)).convert("RGB")
                 )
-            st.toast("画像を追加しました！", icon="📸")
 
-    col_ai1, col_ai2, col_ai3, col_ai4 = st.columns(
-        [1.2, 1.2, 1.3, 1.5]
-    )
-    with col_ai1:
+    bar1, bar2, bar3, bar4 = st.columns([1.2, 1.8, 0.8, 0.8])
+    with bar1:
         target_size = st.text_input(
-            "指定サイズ (空欄なら自動)",
+            "サイズ指定",
             value="",
-            placeholder="例: 88, L, 2XL",
+            placeholder="サイズ指定(任意)",
+            label_visibility="collapsed",
             key="t3_target_size"
         )
-    with col_ai2:
-        ai_model = st.selectbox(
-            "AIモデル",
-            [
-                "gemini-3.8-flash (高速)",
-                "gemini-3.8-pro (高精度)"
-            ],
-            key="t3_ai_model"
-        )
-        selected_model_name = (
-            "gemini-3.8-flash"
-            if "flash" in ai_model
-            else "gemini-3.8-pro"
-        )
-    with col_ai3:
-        auto_crop = st.checkbox(
-            "✂️ 服の写真だけ自動切り抜き",
-            value=True,
-            key="t3_auto_crop"
-        )
-    with col_ai4:
+    with bar2:
         run_ai = st.button(
-            "🪄 ページ全体からAI自動入力",
+            "🪄 AI自動入力",
             type="primary",
             use_container_width=True,
             key="t3_btn_run_ai"
         )
+    with bar3:
+        if HAS_PASTE_BTN:
+            p_res = paste_image_button(
+                label="📋 貼付",
+                background_color="#334155",
+                hover_background_color="#1e293b",
+                key="t3_paste_btn"
+            )
+            if p_res.image_data is not None:
+                b_io = io.BytesIO()
+                p_res.image_data.save(b_io, format="PNG")
+                p_hash = hashlib.md5(b_io.getvalue()).hexdigest()
+                if p_hash not in st.session_state.processed_hashes_t3:
+                    st.session_state.processed_hashes_t3.add(p_hash)
+                    st.session_state.staged_images.append(
+                        p_res.image_data.convert("RGB")
+                    )
+                    st.rerun()
+    with bar4:
+        if st.button(
+            "🗑️ クリア",
+            use_container_width=True,
+            key="t3_btn_clear"
+        ):
+            st.session_state.staged_images = []
+            st.session_state.processed_hashes_t3 = set()
+            st.session_state.up_key_t3 += 1
+            st.rerun()
+
+    with st.expander("⚙️ AI詳細設定"):
+        ac1, ac2 = st.columns(2)
+        ai_model = ac1.selectbox(
+            "モデル",
+            ["gemini-3.8-flash", "gemini-3.8-pro"],
+            key="t3_ai_model"
+        )
+        auto_crop = ac2.checkbox(
+            "✂️ 服の写真だけ自動切り抜き",
+            value=True,
+            key="t3_auto_crop"
+        )
 
     if run_ai:
         if st.session_state.staged_images:
-            with st.spinner("AIが情報を抽出中..."):
+            with st.spinner("AI解析中..."):
                 try:
                     client = genai.Client(
                         api_key=GEMINI_API_KEY
@@ -943,33 +788,24 @@ with tab3:
                         prepare_image_for_ai(img)
                         for img in st.session_state.staged_images
                     ]
-                    if target_size.strip():
-                        s_cond = (
-                            f"サイズ「{target_size}」の"
-                            "数値を抽出してください。"
-                        )
-                    else:
-                        s_cond = (
-                            "サイズ表の代表サイズ（88, 34, L等）"
-                            "を抽出し detected_size_label に"
-                            "入れてください。"
-                        )
-
+                    s_cond = (
+                        f"サイズ「{target_size}」の数値を抽出。"
+                        if target_size.strip()
+                        else "代表サイズ（88, 34, L等）を抽出し"
+                             " detected_size_label に入れる。"
+                    )
                     prompt = (
                         "通販スクショから以下を抽出してください。\n"
                         "1. brand, item_name, category"
                         "（トップス/アウター/ボトムス/その他）\n"
-                        "2. color（色）：画面内の文字表記から"
-                        "色名を最優先で抽出し、文字がなければ"
-                        "商品写真の見た目から色名を判断。\n"
+                        "2. color：文字表記を最優先、なければ"
+                        "写真の見た目から色名を判断。\n"
                         f"3. {s_cond}\n"
-                        "4. サイズ表記ルール：88や34等の数値は"
+                        "4. サイズルール：88や34等の数値は"
                         "勝手にL等に変えず数値のままにする。"
                         "XXLや2Lは2XLに、XXXLや3Lは3XLに統一。\n"
-                        "5. 採寸(cm)：length(着丈/総丈), width(身幅),"
-                        " shoulder(肩幅), sleeve(袖丈),"
-                        " waist(ウエスト), inseam(股下),"
-                        " hip(ヒップ), thigh(わたり幅)。"
+                        "5. 採寸(cm)：length, width, shoulder,"
+                        " sleeve, waist, inseam, hip, thigh。"
                         "該当なしは0。\n"
                         "6. 写真切り抜き：メインの服の大きな写真が"
                         "ある画像番号(0始まり)をcrop_image_indexに、"
@@ -988,7 +824,7 @@ with tab3:
                             )
                             response = (
                                 client.models.generate_content(
-                                    model=selected_model_name,
+                                    model=ai_model,
                                     contents=contents,
                                     config=cfg,
                                 )
@@ -1069,101 +905,89 @@ with tab3:
                             st.session_state.staged_images.insert(
                                 0, cropped
                             )
-
-                    st.success("AI自動入力が完了しました！")
+                    st.rerun()
                 except Exception as e:
-                    st.error(f"AI読み取りエラー: {e}")
+                    st.error(f"AIエラー: {e}")
         else:
-            st.warning("先に画像を読み込んでください。")
+            st.warning("先に画像を選択してください。")
 
     images_to_save = []
     if st.session_state.staged_images:
-        st.markdown("##### 📌 読み込み中の画像")
         p_cols = st.columns(4)
         for idx, img in enumerate(
             st.session_state.staged_images
         ):
             with p_cols[idx % 4]:
-                cap = f"#{idx+1}" + (
-                    " (メイン)" if idx == 0 else ""
-                )
-                st.image(
-                    img, caption=cap, use_container_width=True
-                )
+                st.image(img, use_container_width=True)
                 def_chk = True if idx == 0 else False
+                lbl = "メイン保存" if idx == 0 else f"保存 #{idx+1}"
                 if st.checkbox(
-                    "💾 保存",
+                    lbl,
                     value=def_chk,
                     key=f"t3_save_img_{idx}"
                 ):
                     images_to_save.append(img)
 
-    st.divider()
-    st.markdown("##### 2. アイテム情報の確認・登録")
-
     with st.form("register_form"):
-        c1, c2, c3, c4 = st.columns(4)
-        brand = c1.text_input("ブランド名", key="f_brand")
-        item_name = c2.text_input(
-            "アイテム名", key="f_item_name"
-        )
+        c1, c2 = st.columns(2)
+        brand = c1.text_input("ブランド", key="f_brand")
+        item_name = c2.text_input("アイテム名", key="f_item_name")
+
+        c3, c4, c5 = st.columns(3)
         category = c3.selectbox(
             "カテゴリ",
             ["トップス", "アウター", "ボトムス", "その他"],
             key="f_category"
         )
-        color = c4.text_input("色（カラー）", key="f_color")
+        color = c4.text_input("色", key="f_color")
+        size_label = c5.text_input("サイズ", key="f_size_label")
 
-        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
-        size_label = sc1.text_input(
-            "表記サイズ", key="f_size_label"
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        length = sc1.number_input(
+            "着丈", step=0.5, key="f_length"
         )
-        length = sc2.number_input(
-            "着丈・総丈", step=0.5, key="f_length"
-        )
-        width = sc3.number_input(
+        width = sc2.number_input(
             "身幅", step=0.5, key="f_width"
         )
-        shoulder = sc4.number_input(
+        shoulder = sc3.number_input(
             "肩幅", step=0.5, key="f_shoulder"
         )
-        sleeve = sc5.number_input(
+        sleeve = sc4.number_input(
             "袖丈", step=0.5, key="f_sleeve"
         )
 
-        sc6, sc7, sc8, sc9 = st.columns(4)
-        waist = sc6.number_input(
+        sc5, sc6, sc7, sc8 = st.columns(4)
+        waist = sc5.number_input(
             "ウエスト", step=0.5, key="f_waist"
         )
-        inseam = sc7.number_input(
+        inseam = sc6.number_input(
             "股下", step=0.5, key="f_inseam"
         )
-        hip = sc8.number_input(
+        hip = sc7.number_input(
             "ヒップ", step=0.5, key="f_hip"
         )
-        thigh = sc9.number_input(
+        thigh = sc8.number_input(
             "わたり幅", step=0.5, key="f_thigh"
         )
 
         memo = st.text_area(
-            "📝 メモ（サイズ感・着心地・購入先など自由記入）",
-            placeholder="例: ウエスト少しゆとりあり、生地厚めで冬向き",
-            height=68,
+            "メモ",
+            placeholder="サイズ感・着心地など",
+            height=60,
             key="f_memo"
         )
 
         submitted = st.form_submit_button(
-            "💾 シートに保存する",
+            "💾 登録する",
             type="primary",
             use_container_width=True
         )
 
         if submitted:
-            with st.spinner("保存しています..."):
+            with st.spinner("保存中..."):
                 main_img_data, sub_img_str = (
                     pack_images_for_row(images_to_save)
                 )
-
                 new_row = [
                     str(uuid.uuid4())[:8],
                     brand, item_name, category, color,
@@ -1175,31 +999,30 @@ with tab3:
                     memo
                 ]
                 worksheet.append_row(new_row)
-                st.success(
-                    f"「{brand} {item_name}」を保存しました！"
-                )
-                time.sleep(0.8)
+                st.session_state.staged_images = []
+                st.session_state.processed_hashes_t3 = set()
+                st.session_state.up_key_t3 += 1
+                st.success("保存しました！")
+                time.sleep(0.6)
                 st.rerun()
 
 # ==========================================
-# タブ4：登録済みアイテムの編集・画像追加
+# タブ4：編集・画像追加（シンプル版）
 # ==========================================
 with tab4:
     if df.empty:
-        st.info("まだ登録されたアイテムがありません。")
+        st.info("データがありません。")
     else:
-        options = []
-        for idx, r in df.iterrows():
-            iid = str(r.get("アイテムID", ""))
-            br = str(r.get("ブランド", ""))
-            inm = str(r.get("アイテム名", ""))
-            sz = str(r.get("表記サイズ", ""))
-            cl = str(r.get("色", ""))
-            options.append(f"{iid} | {br} - {inm} ({sz} / {cl})")
-
+        options = [
+            f"{r.get('アイテムID')} | "
+            f"{r.get('ブランド')} - {r.get('アイテム名')} "
+            f"({r.get('表記サイズ')})"
+            for _, r in df.iterrows()
+        ]
         sel_opt = st.selectbox(
-            "編集・画像追加するアイテムを選択",
+            "対象アイテム",
             options,
+            label_visibility="collapsed",
             key="t4_select_item"
         )
         sel_id = sel_opt.split(" | ")[0]
@@ -1207,7 +1030,6 @@ with tab4:
             df["アイテムID"].astype(str) == sel_id
         ].iloc[0]
 
-        st.markdown("##### 🖼️ 現在登録されている画像")
         existing_pils = []
         m_str = str(sel_row.get("メイン画像URL", "")).strip()
         if m_str:
@@ -1226,69 +1048,70 @@ with tab4:
             e_cols = st.columns(4)
             for idx, e_img in enumerate(existing_pils):
                 with e_cols[idx % 4]:
-                    lbl = (
-                        "メイン"
-                        if idx == 0
-                        else f"サブ #{idx}"
-                    )
-                    st.image(
-                        e_img,
-                        caption=lbl,
-                        use_container_width=True
-                    )
+                    st.image(e_img, use_container_width=True)
+                    lbl = "メイン残す" if idx == 0 else f"サブ#{idx}"
                     if st.checkbox(
-                        "残す",
+                        lbl,
                         value=True,
                         key=f"t4_keep_{sel_id}_{idx}"
                     ):
                         kept_existing_pils.append(e_img)
-        else:
-            st.caption("現在登録されている画像はありません。")
 
-        st.markdown("---")
-        st.markdown("##### 📸 新しい画像を追加する")
+        edit_add_files = st.file_uploader(
+            "📸 追加する画像を選択 (Ctrl+V も可)",
+            type=["jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
+            key=f"t4_up_{st.session_state.up_key_t4}"
+        )
+        if edit_add_files:
+            for eaf in edit_add_files:
+                raw_b4 = eaf.getvalue()
+                h4 = hashlib.md5(raw_b4).hexdigest()
+                if h4 not in st.session_state.processed_hashes_t4:
+                    st.session_state.processed_hashes_t4.add(h4)
+                    st.session_state.edit_staged_images.append(
+                        Image.open(io.BytesIO(raw_b4)).convert("RGB")
+                    )
 
-        ec1, ec2 = st.columns([1.5, 1])
-        with ec1:
+        eb1, eb2, eb3 = st.columns([1, 1, 2])
+        with eb1:
             if HAS_PASTE_BTN:
                 p_res4 = paste_image_button(
-                    label="📋 スクショを直接貼り付け",
-                    background_color="#2563eb",
-                    hover_background_color="#1d4ed8",
-                    key="t4_paste_component"
+                    label="📋 貼付",
+                    background_color="#334155",
+                    hover_background_color="#1e293b",
+                    key="t4_paste_btn"
                 )
                 if p_res4.image_data is not None:
                     b_io4 = io.BytesIO()
                     p_res4.image_data.save(b_io4, format="PNG")
-                    h4 = hashlib.md5(b_io4.getvalue()).hexdigest()
-                    if h4 != st.session_state.last_paste_hash_t4:
-                        st.session_state.last_paste_hash_t4 = h4
+                    h_p4 = hashlib.md5(
+                        b_io4.getvalue()
+                    ).hexdigest()
+                    if h_p4 not in st.session_state.processed_hashes_t4:
+                        st.session_state.processed_hashes_t4.add(h_p4)
                         st.session_state.edit_staged_images.append(
                             p_res4.image_data.convert("RGB")
                         )
-                        st.toast("追加画像を貼り付けました！", icon="📸")
-        with ec2:
-            if st.button("🗑️ 追加分をすべてクリア", key="t4_btn_clear"):
-                st.session_state.edit_staged_images = []
-                st.session_state.last_paste_hash_t4 = ""
-                st.rerun()
-
-        edit_add_files = st.file_uploader(
-            "📁 または画像ファイルを選択（複数可）",
-            type=["jpg", "jpeg", "png", "webp"],
-            accept_multiple_files=True,
-            key="t4_file_uploader_add"
-        )
-        if edit_add_files:
+                        st.rerun()
+        with eb2:
             if st.button(
-                "⬆️ 選択した画像を追加リストに反映",
-                key="t4_btn_add_files"
+                "🗑️ 追加クリア",
+                use_container_width=True,
+                key="t4_btn_clear"
             ):
-                for eaf in edit_add_files:
-                    st.session_state.edit_staged_images.append(
-                        Image.open(eaf).convert("RGB")
-                    )
-                st.toast("追加画像をセットしました！", icon="📸")
+                st.session_state.edit_staged_images = []
+                st.session_state.processed_hashes_t4 = set()
+                st.session_state.up_key_t4 += 1
+                st.rerun()
+        with eb3:
+            add_mode = st.radio(
+                "追加位置",
+                ["サブに追加", "メインに差替"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="t4_add_mode"
+            )
 
         new_to_add = []
         if st.session_state.edit_staged_images:
@@ -1297,32 +1120,18 @@ with tab4:
                 st.session_state.edit_staged_images
             ):
                 with n_cols[idx % 4]:
-                    st.image(
-                        n_img,
-                        caption=f"追加 #{idx+1}",
-                        use_container_width=True
-                    )
+                    st.image(n_img, use_container_width=True)
                     if st.checkbox(
-                        "追加する",
+                        f"追加 #{idx+1}",
                         value=True,
                         key=f"t4_add_chk_{idx}"
                     ):
                         new_to_add.append(n_img)
 
-        add_mode = st.radio(
-            "画像の追加位置",
-            [
-                "サブ画像として末尾に追加",
-                "新しい1枚目をメイン画像にする"
-            ],
-            horizontal=True,
-            key="t4_add_mode"
-        )
-
         with st.form("edit_item_form"):
-            fc1, fc2, fc3, fc4 = st.columns(4)
+            fc1, fc2 = st.columns(2)
             e_brand = fc1.text_input(
-                "ブランド名",
+                "ブランド",
                 value=str(sel_row.get("ブランド", "")),
                 key=f"t4_br_{sel_id}"
             )
@@ -1331,6 +1140,8 @@ with tab4:
                 value=str(sel_row.get("アイテム名", "")),
                 key=f"t4_nm_{sel_id}"
             )
+
+            fc3, fc4, fc5 = st.columns(3)
             cat_list = ["トップス", "アウター", "ボトムス", "その他"]
             cur_cat = str(sel_row.get("カテゴリ", "トップス"))
             cat_idx = (
@@ -1345,62 +1156,62 @@ with tab4:
                 key=f"t4_ct_{sel_id}"
             )
             e_color = fc4.text_input(
-                "色（カラー）",
+                "色",
                 value=str(sel_row.get("色", "")),
                 key=f"t4_cl_{sel_id}"
             )
-
-            sc1, sc2, sc3, sc4, sc5 = st.columns(5)
-            e_size = sc1.text_input(
-                "表記サイズ",
+            e_size = fc5.text_input(
+                "サイズ",
                 value=str(sel_row.get("表記サイズ", "")),
                 key=f"t4_sz_{sel_id}"
             )
-            e_len = sc2.number_input(
-                "着丈・総丈",
+
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            e_len = sc1.number_input(
+                "着丈",
                 value=float(sel_row.get("着丈") or 0.0),
                 step=0.5,
                 key=f"t4_ln_{sel_id}"
             )
-            e_wid = sc3.number_input(
+            e_wid = sc2.number_input(
                 "身幅",
                 value=float(sel_row.get("身幅") or 0.0),
                 step=0.5,
                 key=f"t4_wd_{sel_id}"
             )
-            e_shd = sc4.number_input(
+            e_shd = sc3.number_input(
                 "肩幅",
                 value=float(sel_row.get("肩幅") or 0.0),
                 step=0.5,
                 key=f"t4_sh_{sel_id}"
             )
-            e_slv = sc5.number_input(
+            e_slv = sc4.number_input(
                 "袖丈",
                 value=float(sel_row.get("袖丈") or 0.0),
                 step=0.5,
                 key=f"t4_sl_{sel_id}"
             )
 
-            sc6, sc7, sc8, sc9 = st.columns(4)
-            e_wst = sc6.number_input(
+            sc5, sc6, sc7, sc8 = st.columns(4)
+            e_wst = sc5.number_input(
                 "ウエスト",
                 value=float(sel_row.get("ウエスト") or 0.0),
                 step=0.5,
                 key=f"t4_ws_{sel_id}"
             )
-            e_ins = sc7.number_input(
+            e_ins = sc6.number_input(
                 "股下",
                 value=float(sel_row.get("股下") or 0.0),
                 step=0.5,
                 key=f"t4_in_{sel_id}"
             )
-            e_hip = sc8.number_input(
+            e_hip = sc7.number_input(
                 "ヒップ",
                 value=float(sel_row.get("ヒップ") or 0.0),
                 step=0.5,
                 key=f"t4_hp_{sel_id}"
             )
-            e_thg = sc9.number_input(
+            e_thg = sc8.number_input(
                 "わたり幅",
                 value=float(sel_row.get("わたり幅") or 0.0),
                 step=0.5,
@@ -1408,21 +1219,21 @@ with tab4:
             )
 
             e_memo = st.text_area(
-                "📝 メモ",
+                "メモ",
                 value=str(sel_row.get("メモ") or ""),
-                height=68,
+                height=60,
                 key=f"t4_mm_{sel_id}"
             )
 
             save_edit = st.form_submit_button(
-                "💾 変更と追加画像を保存する",
+                "💾 更新する",
                 type="primary",
                 use_container_width=True
             )
 
             if save_edit:
-                with st.spinner("更新しています..."):
-                    if "メイン画像にする" in add_mode:
+                with st.spinner("更新中..."):
+                    if "メイン" in add_mode:
                         final_imgs = (
                             new_to_add + kept_existing_pils
                         )
@@ -1456,15 +1267,15 @@ with tab4:
                             values=[updated_row]
                         )
                         st.session_state.edit_staged_images = []
-                        st.success("更新が完了しました！")
-                        time.sleep(1)
+                        st.session_state.processed_hashes_t4 = set()
+                        st.session_state.up_key_t4 += 1
+                        st.success("更新しました！")
+                        time.sleep(0.6)
                         st.rerun()
-                    else:
-                        st.error("該当IDが見つかりませんでした。")
 
-        with st.expander("🗑️ このアイテムを削除する"):
+        with st.expander("🗑️ アイテム削除"):
             if st.button(
-                "本当にこのアイテムを削除する",
+                "このアイテムを削除する",
                 type="secondary",
                 key=f"t4_del_{sel_id}"
             ):
@@ -1472,23 +1283,4 @@ with tab4:
                 if sel_id in id_col:
                     row_num = id_col.index(sel_id) + 1
                     worksheet.delete_rows(row_num)
-                    st.success("削除しました！")
-                    time.sleep(1)
                     st.rerun()
-
-if json_files:
-    st.divider()
-    with st.expander("🌐 クラウド公開用の設定データ（Secrets）"):
-        try:
-            with open(json_files[0], "r", encoding="utf-8") as jf:
-                j_obj = json.load(jf)
-            t_lines = [
-                f'GEMINI_API_KEY = "{GEMINI_API_KEY}"',
-                "",
-                "[gcp_service_account]"
-            ]
-            for k, v in j_obj.items():
-                t_lines.append(f"{k} = {json.dumps(v)}")
-            st.code("\n".join(t_lines), language="toml")
-        except Exception as se:
-            st.error(f"読込エラー: {se}")
