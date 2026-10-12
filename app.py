@@ -15,12 +15,6 @@ import base64
 import json
 import html
 
-try:
-    from PIL import ImageGrab
-    HAS_CLIPBOARD = True
-except Exception:
-    HAS_CLIPBOARD = False
-
 REQ_FILE = "requirements.txt"
 REQ_TEXT = "\n".join([
     "streamlit",
@@ -472,7 +466,7 @@ records = worksheet.get_all_records()
 df = pd.DataFrame(records)
 
 # ==========================================
-# タブ1：サイズ比較（写真展開＆メモ直接編集つき）
+# タブ1：サイズ比較
 # ==========================================
 with tab1:
     if not df.empty:
@@ -600,7 +594,7 @@ with tab1:
                         "📝 メモ（サイズ感・着心地・コーデなど）",
                         value=cur_memo,
                         height=68,
-                        placeholder="例: ウエスト少し余裕あり、丈感ジャスト",
+                        placeholder="例: ウエスト少しゆとりあり、丈感ジャスト",
                         key=f"t1_memo_in_{iid}_{idx}"
                     )
                     if st.button(
@@ -787,98 +781,29 @@ with tab2:
 # タブ3：新規アイテム登録
 # ==========================================
 with tab3:
-    st.markdown("##### 1. スクショ読込 ＆ AI自動入力")
-    col_b1, col_b2, col_b3 = st.columns([1.2, 1.5, 1])
+    st.markdown("##### 1. 画像選択 ＆ AI自動入力")
+    st.caption("💡 スマホ・PCのファイル選択からスクショを選んで追加できます。")
 
-    with col_b1:
-        if st.button(
-            "📋 スクショ貼付 (PC)",
-            use_container_width=True,
-            key="t3_btn_paste"
-        ):
-            if HAS_CLIPBOARD:
-                try:
-                    grabbed = ImageGrab.grabclipboard()
-                    if isinstance(grabbed, Image.Image):
-                        st.session_state.staged_images.append(
-                            grabbed.convert("RGB")
-                        )
-                        st.toast("画像を追加しました！", icon="📸")
-                    else:
-                        st.warning("画像がありません。")
-                except Exception:
-                    st.warning("下のファイル選択を使ってください。")
-            else:
-                st.warning("下のファイル選択を使ってください。")
-
-    with col_b2:
-        if st.button(
-            "📂 フォルダ一括読込 (PC)",
-            use_container_width=True,
-            key="t3_btn_folder"
-        ):
-            img_paths = []
-            for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
-                img_paths.extend(
-                    glob.glob(
-                        os.path.join(LOCAL_INPUT_DIR, ext)
-                    )
-                )
-            if img_paths:
-                for p in sorted(img_paths):
-                    try:
-                        img = Image.open(p).convert("RGB")
-                        st.session_state.staged_images.append(
-                            img
-                        )
-                    except Exception:
-                        pass
-                st.toast(
-                    f"{len(img_paths)}枚読み込みました！",
-                    icon="📂"
-                )
-            else:
-                st.warning("フォルダ内に画像がありません。")
-
-    with col_b3:
-        c_clear1, c_clear2 = st.columns(2)
-        if c_clear1.button(
-            "🗑️ クリア",
-            use_container_width=True,
-            key="t3_btn_clear"
-        ):
-            st.session_state.staged_images = []
-            st.rerun()
-        if c_clear2.button(
-            "🧹 空にする",
-            use_container_width=True,
-            key="t3_btn_empty"
-        ):
-            for f in glob.glob(
-                os.path.join(LOCAL_INPUT_DIR, "*")
-            ):
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
-            st.toast("フォルダを空にしました！", icon="🧹")
-
-    mob_files = st.file_uploader(
-        "📱 iPhone・PCから画像を選択して追加（複数可）",
+    reg_files = st.file_uploader(
+        "📁 スクショや商品画像を選択して追加（複数可）",
         type=["jpg", "jpeg", "png", "webp"],
         accept_multiple_files=True,
-        key="t3_mob_uploader"
+        key="t3_file_uploader"
     )
-    if mob_files:
+    if reg_files:
         if st.button(
             "⬆️ 選択した画像をAI読込リストに追加",
-            key="t3_btn_add_mob"
+            key="t3_btn_add_files"
         ):
-            for mf in mob_files:
+            for rf in reg_files:
                 st.session_state.staged_images.append(
-                    Image.open(mf).convert("RGB")
+                    Image.open(rf).convert("RGB")
                 )
-            st.toast("画像を追加しました！", icon="📱")
+            st.toast("画像を追加しました！", icon="📸")
+
+    if st.button("🗑️ 読込画像をすべてクリア", key="t3_btn_clear_staged"):
+        st.session_state.staged_images = []
+        st.rerun()
 
     col_ai1, col_ai2, col_ai3, col_ai4 = st.columns(
         [1.2, 1.2, 1.3, 1.5]
@@ -1138,14 +1063,6 @@ with tab3:
             key="f_memo"
         )
 
-        with st.expander("📁 直接ファイルを選択して追加"):
-            uploaded_files = st.file_uploader(
-                "画像ファイルを選択",
-                type=["jpg", "jpeg", "png", "webp"],
-                accept_multiple_files=True,
-                key="t3_file_photos"
-            )
-
         submitted = st.form_submit_button(
             "💾 シートに保存する",
             type="primary",
@@ -1154,15 +1071,8 @@ with tab3:
 
         if submitted:
             with st.spinner("保存しています..."):
-                all_imgs = list(images_to_save)
-                if uploaded_files:
-                    for uf in uploaded_files:
-                        all_imgs.append(
-                            Image.open(uf).convert("RGB")
-                        )
-
                 main_img_data, sub_img_str = (
-                    pack_images_for_row(all_imgs)
+                    pack_images_for_row(images_to_save)
                 )
 
                 new_row = [
@@ -1248,60 +1158,24 @@ with tab4:
 
         st.markdown("---")
         st.markdown("##### 📸 新しい画像を追加する")
-        ec1, ec2, ec3 = st.columns([1.2, 1.5, 1])
-        with ec1:
-            if st.button(
-                "📋 スクショ貼付 (PC)",
-                use_container_width=True,
-                key="t4_btn_paste"
-            ):
-                if HAS_CLIPBOARD:
-                    try:
-                        grabbed = ImageGrab.grabclipboard()
-                        if isinstance(grabbed, Image.Image):
-                            st.session_state.edit_staged_images.append(
-                                grabbed.convert("RGB")
-                            )
-                            st.toast("セットしました！", icon="📸")
-                        else:
-                            st.warning("画像がありません。")
-                    except Exception:
-                        st.warning("ファイル選択を使ってください。")
-                else:
-                    st.warning("ファイル選択を使ってください。")
-        with ec2:
-            if st.button(
-                "📂 フォルダ読込 (PC)",
-                use_container_width=True,
-                key="t4_btn_folder"
-            ):
-                img_paths = []
-                for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
-                    img_paths.extend(
-                        glob.glob(
-                            os.path.join(LOCAL_INPUT_DIR, ext)
-                        )
+        
+        edit_add_files = st.file_uploader(
+            "📁 追加する画像ファイルを選択（複数可）",
+            type=["jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
+            key="t4_file_uploader_add"
+        )
+        if edit_add_files:
+            if st.button("⬆️ 選択した画像を追加リストに反映", key="t4_btn_add_files"):
+                for eaf in edit_add_files:
+                    st.session_state.edit_staged_images.append(
+                        Image.open(eaf).convert("RGB")
                     )
-                if img_paths:
-                    for p in sorted(img_paths):
-                        try:
-                            im = Image.open(p).convert("RGB")
-                            st.session_state.edit_staged_images.append(
-                                im
-                            )
-                        except Exception:
-                            pass
-                    st.toast("フォルダから読み込みました！")
-                else:
-                    st.warning("フォルダに画像がありません。")
-        with ec3:
-            if st.button(
-                "🗑️ 追加分クリア",
-                use_container_width=True,
-                key="t4_btn_clear"
-            ):
-                st.session_state.edit_staged_images = []
-                st.rerun()
+                st.toast("追加画像をセットしました！", icon="📸")
+
+        if st.button("🗑️ 追加分をすべてクリア", key="t4_btn_clear"):
+            st.session_state.edit_staged_images = []
+            st.rerun()
 
         new_to_add = []
         if st.session_state.edit_staged_images:
@@ -1427,13 +1301,6 @@ with tab4:
                 key=f"t4_mm_{sel_id}"
             )
 
-            edit_files = st.file_uploader(
-                "📱 iPhone・ファイルから画像を追加（任意）",
-                type=["jpg", "jpeg", "png", "webp"],
-                accept_multiple_files=True,
-                key=f"t4_up_{sel_id}"
-            )
-
             save_edit = st.form_submit_button(
                 "💾 変更と追加画像を保存する",
                 type="primary",
@@ -1442,20 +1309,13 @@ with tab4:
 
             if save_edit:
                 with st.spinner("更新しています..."):
-                    added_all = list(new_to_add)
-                    if edit_files:
-                        for ef in edit_files:
-                            added_all.append(
-                                Image.open(ef).convert("RGB")
-                            )
-
                     if "メイン画像にする" in add_mode:
                         final_imgs = (
-                            added_all + kept_existing_pils
+                            new_to_add + kept_existing_pils
                         )
                     else:
                         final_imgs = (
-                            kept_existing_pils + added_all
+                            kept_existing_pils + new_to_add
                         )
 
                     new_main, new_sub = pack_images_for_row(
